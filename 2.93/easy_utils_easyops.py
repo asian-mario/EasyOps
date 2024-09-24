@@ -82,8 +82,9 @@ class EasyOpsPanel(bpy.types.Panel):
         
         layout.label(text="Modifiers and Cleanup")
         layout.operator("object.easy_smart_decimate", text="Smart Decimate")
-        layout.operator("object.easy_sharpen_edges", text="Sharpen Edges")
+        layout.operator("object.easy_sharpen_edges", text="Flat Shading")
         layout.operator("object.easy_clean_geometry", text="Clean Geometry")
+        layout.operator("object.easy_smart_apply", text="Smart Apply")
         
         # Modifier adjustment section
         if obj and obj.type == 'MESH':
@@ -209,9 +210,24 @@ class OBJECT_OT_easy_bevel(bpy.types.Operator):
         return {'FINISHED'}
 
 def turn_into_wireframe(obj):
-    wireframe_modifier = obj.modifiers.new(name="Wireframe", type='WIREFRAME')
-    wireframe_modifier.thickness = 0.02  # Adjust the thickness if needed
-    wireframe_modifier.use_replace = True  # Replace original geometry with wireframe
+    # Set the object to display as wireframe in the viewport
+    obj.display_type = 'WIRE'
+    
+    # Check if the collection 'EASYOPS_CUTS' exists, if not, create it
+    if "EASYOPS_CUTS" not in bpy.data.collections:
+        new_collection = bpy.data.collections.new("EASYOPS_CUTS")
+        bpy.context.scene.collection.children.link(new_collection)
+
+    # Get the EASYOPS_CUTS collection
+    cuts_collection = bpy.data.collections["EASYOPS_CUTS"]
+
+    # If the object is already in a collection, unlink it from the original collection
+    for collection in obj.users_collection:
+        collection.objects.unlink(obj)
+
+    # Link the object to the 'EASYOPS_CUTS' collection
+    cuts_collection.objects.link(obj)
+
 
 # Boolean operations
 class OBJECT_OT_easy_boolean_difference(bpy.types.Operator):
@@ -228,6 +244,8 @@ class OBJECT_OT_easy_boolean_difference(bpy.types.Operator):
                 modifier = obj.modifiers.new(name="Boolean Difference", type='BOOLEAN')
                 modifier.operation = 'DIFFERENCE'
                 modifier.object = active_obj
+
+        turn_into_wireframe(active_obj)
 
         self.report({'INFO'}, "Boolean Difference applied.")
         return {'FINISHED'}
@@ -248,6 +266,7 @@ class OBJECT_OT_easy_boolean_union(bpy.types.Operator):
                 modifier.operation = 'UNION'
                 modifier.object = active_obj
 
+        turn_into_wireframe(active_obj)
         self.report({'INFO'}, "Boolean Union applied.")
         return {'FINISHED'}
 
@@ -266,6 +285,7 @@ class OBJECT_OT_easy_boolean_intersect(bpy.types.Operator):
                 modifier.operation = 'INTERSECT'
                 modifier.object = active_obj
 
+        turn_into_wireframe(active_obj)
         self.report({'INFO'}, "Boolean Intersect applied.")
         return {'FINISHED'}
     
@@ -309,6 +329,7 @@ class OBJECT_OT_easy_smart_decimate(bpy.types.Operator):
                     modifier = obj.modifiers.new(name="Decimate", type='DECIMATE')
                     modifier.ratio = 0.5  # Adjust reduction factor
 
+            
         self.report({'INFO'}, "Decimate applied to reduce polygon count.")
         return {'FINISHED'}
 
@@ -316,7 +337,7 @@ class OBJECT_OT_easy_smart_decimate(bpy.types.Operator):
 class OBJECT_OT_easy_sharpen_edges(bpy.types.Operator):
     bl_label = "Sharpen Edges"
     bl_idname = "object.easy_sharpen_edges"
-    bl_description = "Marks selected edges as sharp."
+    bl_description = "Marks selected edges as sharp / equivalent to flat shading."
 
     def execute(self, context):
         target_objects = get_target_objects(context)
@@ -325,7 +346,6 @@ class OBJECT_OT_easy_sharpen_edges(bpy.types.Operator):
                 bpy.context.view_layer.objects.active = obj
                 bpy.ops.object.mode_set(mode='EDIT')
                 bpy.ops.mesh.mark_sharp()
-                bpy.ops.object.mode_set(mode='OBJECT')
         self.report({'INFO'}, "Sharp edges marked on selected/all objects.")
         return {'FINISHED'}
 
@@ -333,7 +353,7 @@ class OBJECT_OT_easy_sharpen_edges(bpy.types.Operator):
 class OBJECT_OT_easy_clean_geometry(bpy.types.Operator):
     bl_label = "Clean Geometry"
     bl_idname = "object.easy_clean_geometry"
-    bl_description = "Cleans loose geometry, removes doubles, and merges vertices by distance."
+    bl_description = "Cleans loose geometry, removes doubles (merges vertices by distance), and dissolves degenerate faces."
 
     def execute(self, context):
         target_objects = get_target_objects(context)
@@ -341,13 +361,22 @@ class OBJECT_OT_easy_clean_geometry(bpy.types.Operator):
             if obj.type == 'MESH':
                 bpy.context.view_layer.objects.active = obj
                 bpy.ops.object.mode_set(mode='EDIT')
-                bpy.ops.mesh.remove_doubles()
+
+                # Merge by Distance (Replacing remove_doubles)
+                bpy.ops.mesh.select_all(action='SELECT')
+                bpy.ops.mesh.merge_by_distance(distance=0.0001)  # Correct distance operator
+
+                # Delete loose geometry
                 bpy.ops.mesh.delete_loose()
+
+                # Dissolve degenerate geometry
                 bpy.ops.mesh.dissolve_degenerate()
+
                 bpy.ops.object.mode_set(mode='OBJECT')
 
         self.report({'INFO'}, "Cleaned geometry on selected/all objects.")
         return {'FINISHED'}
+
 
 # Operator to Remove Doubles (Merge by Distance) on All Meshes
 class OBJECT_OT_easy_remove_doubles(bpy.types.Operator):

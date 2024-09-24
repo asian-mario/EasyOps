@@ -12,7 +12,7 @@ class EasyUtilsProperties(bpy.types.PropertyGroup):
     rename_prefix: bpy.props.StringProperty(
         name="Rename Prefix",
         description="Prefix for auto-renaming objects and meshes",
-        default="AK-"
+        default="EO-"
     )
     island_margin: bpy.props.FloatProperty(
         name="Island Margin",

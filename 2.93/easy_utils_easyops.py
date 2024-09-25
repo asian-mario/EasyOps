@@ -5,7 +5,9 @@ bl_info = {
 }
 
 import bpy
+import bmesh
 import math
+
 
 # Custom Properties (can be modified by the user)
 class EasyUtilsProperties(bpy.types.PropertyGroup):
@@ -49,7 +51,7 @@ class EasyUtilsPanel(bpy.types.Panel):
         layout.prop(props, "rename_prefix")
         layout.operator("object.easy_auto_rename", text="Auto Rename")
         layout.separator()  # Adds a visual separator between buttons   
-        
+        layout.operator("object.easy_ssharpen", text="SSharpen")
         # Quick actions buttons
         layout.label(text="Quick Actions:")
         layout.prop(props, "island_margin")  # Add island margin setting for Smart UV Unwrap
@@ -362,9 +364,9 @@ class OBJECT_OT_easy_clean_geometry(bpy.types.Operator):
                 bpy.context.view_layer.objects.active = obj
                 bpy.ops.object.mode_set(mode='EDIT')
 
-                # Merge by Distance (Replacing remove_doubles)
+                # Merge by Distance (Equivalent to Remove Doubles for Blender 2.93)
                 bpy.ops.mesh.select_all(action='SELECT')
-                bpy.ops.mesh.merge_by_distance(distance=0.0001)  # Correct distance operator
+                bpy.ops.mesh.remove_doubles()  # For Blender 2.93 compatibility
 
                 # Delete loose geometry
                 bpy.ops.mesh.delete_loose()
@@ -397,6 +399,88 @@ class OBJECT_OT_easy_remove_doubles(bpy.types.Operator):
         self.report({'INFO'}, "Doubles removed from selected/all mesh objects.")
         return {'FINISHED'}
 
+# Detect and mark sharp edges with customizable angle threshold
+def detect_sharp_edges(obj, angle_threshold=30):
+    angle_threshold_rad = math.radians(angle_threshold)
+    
+    # Ensure the object is in edit mode
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode='EDIT')
+    
+    # Create a BMesh for edge detection
+    bm = bmesh.from_edit_mesh(obj.data)
+    
+    # Loop through all edges
+    for edge in bm.edges:
+        if not edge.is_manifold:  # Skip non-manifold edges
+            continue
+        
+        # Get the faces adjacent to this edge
+        linked_faces = edge.link_faces
+        
+        # Ensure the edge is between two faces
+        if len(linked_faces) == 2:
+            # Calculate the angle between the faces
+            angle = linked_faces[0].normal.angle(linked_faces[1].normal)
+            
+            # Mark sharp if the angle exceeds the threshold
+            if angle > angle_threshold_rad:
+                edge.smooth = False  # Mark as sharp (affects shading)
+                edge.seam = True  # Optional: mark as seam for UVs too
+    
+    # Update the BMesh
+    bmesh.update_edit_mesh(obj.data)
+
+    # Apply bevel weight to selected edges
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.transform.edge_bevelweight(value=1.0)  # Apply maximum bevel weight
+    
+    # Apply crease weight to selected edges (optional, can be toggled by user)
+    bpy.ops.transform.edge_crease(value=1.0)  # Apply full creasing
+
+    # Return to object mode
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+# Add or update bevel modifier for smart sharpening
+def apply_bevel_modifier(obj):
+    # Check if a bevel modifier exists; if not, create one
+    bevel_mod = next((mod for mod in obj.modifiers if mod.type == 'BEVEL'), None)
+    
+    if bevel_mod is None:
+        # Create a new bevel modifier
+        bevel_mod = obj.modifiers.new(name="Bevel", type='BEVEL')
+    
+    # Set bevel parameters
+    bevel_mod.width = 0.02  # Adjust width as needed
+    bevel_mod.segments = 3  # Adjust segments as needed
+    bevel_mod.limit_method = 'WEIGHT'  # Use weight for bevel control
+
+# Enable auto smooth with user-defined angle
+def enable_auto_smooth(obj, smooth_angle=30):
+    obj.data.use_auto_smooth = True
+    obj.data.auto_smooth_angle = math.radians(smooth_angle)
+
+# Main SSharpen operator
+class OBJECT_OT_easy_ssharpen(bpy.types.Operator):
+    bl_label = "SSharpen"
+    bl_idname = "object.easy_ssharpen"
+    bl_description = "Detect sharp edges based on angle, apply bevel and crease, and enable auto smooth."
+
+    def execute(self, context):
+        target_objects = get_target_objects(context)  # Assuming this function gets selected or all objects
+        for obj in target_objects:
+            if obj.type == 'MESH':
+                # Detect sharp edges based on angle
+                detect_sharp_edges(obj, angle_threshold=30)  # You can expose this as a parameter
+                
+                # Apply bevel modifier for sharp edges
+                apply_bevel_modifier(obj)
+                
+                # Enable auto smooth to maintain smooth surfaces
+                enable_auto_smooth(obj, smooth_angle=30)  # You can expose this as a parameter
+        
+        self.report({'INFO'}, "SSharpen applied to selected/all objects.")
+        return {'FINISHED'}
 
 # Register and Unregister Classes
 classes = [
@@ -415,6 +499,7 @@ classes = [
     OBJECT_OT_easy_sharpen_edges,
     OBJECT_OT_easy_clean_geometry,
     OBJECT_OT_easy_smart_apply,
+    OBJECT_OT_easy_ssharpen,
 ]
 
 def register():

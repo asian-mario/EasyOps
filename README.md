@@ -98,3 +98,36 @@ The add-on creates a new tab in the **3D Viewport** called **Easy Utils**. It co
 
 ## License
 This add-on is released under the MIT License.
+
+## EasyScripts Addon
+
+### Overview:
+The **EasyScripts** add-on provides an easy way to manage and execute scripts within Blender. It includes two panels:
+- A panel in the **Text Editor** for writing and saving new scripts.
+- A panel in the **3D Viewport** for uploading, listing, running, editing, and removing scripts.
+
+### Features:
+1. **Text Editor Panel:**
+   - Write scripts and save them directly to a persistent list.
+   - Provides a custom name for each script.
+
+2. **3D Viewport Panel:**
+   - Upload external scripts and save them to the persistent list.
+   - Select a script from a dropdown to run, edit, or remove the script.
+   - Scripts are stored persistently in a custom directory (`easy_scripts` folder).
+
+### Installation:
+1. Download the `EasyScripts` add-on as a `.py` file.
+2. In Blender, go to **Edit > Preferences > Add-ons**.
+3. Click **Install**, and select the `EasyScripts.py` file.
+4. Enable the add-on in the list.
+5. You will now see the **EasyScripts** tab in both the **Text Editor** and **3D Viewport**.
+
+### Usage:
+1. **Text Editor**:
+   - Write your script in a text block.
+   - Save the script via the **EasyScripts** panel in the **Text Editor**.
+   
+2. **3D Viewport**:
+   - Upload, run, edit, or remove previously saved scripts via the **EasyScripts** panel in the **3D Viewport**.
+

@@ -5,6 +5,7 @@ bl_info = {
 }
 
 import bpy
+import random
 import bmesh
 import math
 
@@ -36,6 +37,142 @@ class EasyUtilsProperties(bpy.types.PropertyGroup):
         max=180.0
     )
 
+    metallic_color_min: bpy.props.FloatProperty(
+        name="Metallic Min Intensity",
+        description="Minimum greyscale value for metallic materials (0.0 to 1.0)",
+        default=0.3,
+        min=0.0,
+        max=1.0
+    )
+    metallic_color_max: bpy.props.FloatProperty(
+        name="Metallic Max Intensity",
+        description="Maximum greyscale value for metallic materials (0.0 to 1.0)",
+        default=1.0,
+        min=0.0,
+        max=1.0
+    )
+
+# Operator: Assign Random Materials
+
+class OBJECT_OT_easy_random_materials(bpy.types.Operator):
+    """Assign Random Materials to Selected Objects"""
+    bl_label = "Assign Random Materials"
+    bl_idname = "object.assign_random_materials"
+    bl_description = "Assign random materials to selected objects"
+
+    mode: bpy.props.EnumProperty(
+        name="Mode",
+        description="Choose the randomization mode",
+        items=[
+            ('BASIC', "Basic", "Randomize any color"),
+            ('METALLIC', "Metallic", "Randomize metallic greyscale colors")
+        ]
+    )
+
+    @staticmethod
+    def assign_viewport_display_color(material, color):
+        """Assign the Viewport Display > Color to match the material color"""
+        material.diffuse_color = (*color, 1.0)  # Set RGBA diffuse color for the material
+
+    def execute(self, context):
+        target_objects = context.selected_objects
+
+        if not target_objects:
+            self.report({'WARNING'}, "No objects selected!")
+            return {'CANCELLED'}
+
+        for obj in target_objects:
+            if obj.type == 'MESH':
+                # Create a new material
+                new_material = bpy.data.materials.new(name="RandomMaterial")
+                new_material.use_nodes = True
+                principled_bsdf = new_material.node_tree.nodes.get("Principled BSDF")
+
+                # Assign random color based on mode
+                if self.mode == 'BASIC':
+                    random_color = [random.random() for _ in range(3)]  # RGB random color
+                    metallic_value = 0.0
+                elif self.mode == 'METALLIC':
+                    random_color = [random.uniform(0.2, 0.8)] * 3  # Greyscale color
+                    metallic_value = 1.0
+                else:
+                    self.report({'ERROR'}, "Invalid mode selected!")
+                    return {'CANCELLED'}
+
+                # Set material properties
+                principled_bsdf.inputs["Base Color"].default_value = (*random_color, 1.0)  # RGBA
+                principled_bsdf.inputs["Metallic"].default_value = metallic_value
+
+                # Assign the material to the object
+                obj.data.materials.clear()
+                obj.data.materials.append(new_material)
+
+                # Assign Viewport Display > Color
+                self.assign_viewport_display_color(new_material, random_color)
+
+        self.report({'INFO'}, f"Random materials assigned in {self.mode} mode.")
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        wm = context.window_manager
+        return wm.invoke_props_dialog(self)
+
+
+class OBJECT_MT_easy_radial_menu(bpy.types.Menu):
+    """EasyOps Radial Menu"""
+    bl_label = "EasyOps Radial Menu"
+    bl_idname = "OBJECT_MT_easy_ops_radial_menu"
+
+    def draw(self, context):
+        layout = self.layout
+        pie = layout.menu_pie()
+        selected_objects = context.selected_objects
+
+        # Menu when only one object is selected
+        if len(selected_objects) == 1:
+            pie.operator("object.easy_bevel", text="Bevel", icon='MOD_BEVEL')
+            pie.operator("object.easy_sharpen_edges", text="Sharpen", icon='MOD_SHRINKWRAP')
+            pie.operator("object.easy_smart_uv_unwrap", text="Smart UV Unwrap", icon='UV')
+            pie.operator("object.easy_clean_geometry", text="Clean Geometry", icon='CLEAN_CHANNELS')
+            pie.operator("object.easy_remove_doubles", text="Remove Doubles", icon='X')
+            pie.operator("object.easy_smart_apply", text="Smart Apply", icon='CHECKMARK')
+            pie.operator("object.assign_random_materials", text="Random Materials", icon='MATERIAL')
+            pie.operator("object.easy_auto_rename", text="Auto Rename", icon='OUTLINER_OB_GROUP_INSTANCE')
+
+        # Menu when two objects are selected (boolean options)
+        elif len(selected_objects) == 2:
+            pie.operator("object.easy_boolean_difference", text="Boolean Difference", icon='MOD_BOOLEAN')
+            pie.operator("object.easy_boolean_union", text="Boolean Union", icon='MOD_BOOLEAN')
+            pie.operator("object.easy_boolean_intersect", text="Boolean Intersect", icon='MOD_BOOLEAN')
+            pie.operator("object.easy_clean_geometry", text="Clean Geometry", icon='CLEAN_CHANNELS')
+            pie.operator("object.easy_remove_doubles", text="Remove Doubles", icon='X')
+            pie.operator("object.easy_smart_apply", text="Smart Apply", icon='CHECKMARK')
+            pie.operator("object.easy_smart_uv_unwrap", text="Smart UV Unwrap", icon='UV')
+            pie.operator("object.easy_auto_rename", text="Auto Rename", icon='OUTLINER_OB_GROUP_INSTANCE')
+
+        # Default menu (no objects or unsupported selection)
+        else:
+            pie.label(text="Select one or two objects", icon='INFO')
+
+
+# Shortcut Registration
+addon_keymaps = []
+
+
+def register_shortcut():
+    wm = bpy.context.window_manager
+    kc = wm.keyconfigs.addon
+    if kc:
+        km = kc.keymaps.new(name='Object Mode', space_type='EMPTY')
+        kmi = km.keymap_items.new("wm.call_menu_pie", 'Z', 'PRESS', shift=True)
+        kmi.properties.name = OBJECT_MT_easy_radial_menu.bl_idname
+        addon_keymaps.append((km, kmi))
+
+
+def unregister_shortcut():
+    for km, kmi in addon_keymaps:
+        km.keymap_items.remove(kmi)
+    addon_keymaps.clear()
 # Panel in a Custom "Easy Utils" and "EasyOps" Tab
 class EasyUtilsPanel(bpy.types.Panel):
     bl_label = "Easy Utils"
@@ -52,6 +189,11 @@ class EasyUtilsPanel(bpy.types.Panel):
         layout.operator("object.easy_auto_rename", text="Auto Rename")
         layout.separator()  # Adds a visual separator between buttons   
         layout.operator("object.easy_ssharpen", text="SSharpen")
+
+        layout.label(text="Random Materials:")
+        layout.operator("object.easy_random_materials", text="Assign Random Materials")
+        layout.prop(props, "metallic_color_min")
+        layout.prop(props, "metallic_color_max")
         # Quick actions buttons
         layout.label(text="Quick Actions:")
         layout.prop(props, "island_margin")  # Add island margin setting for Smart UV Unwrap
@@ -499,6 +641,8 @@ classes = [
     OBJECT_OT_easy_sharpen_edges,
     OBJECT_OT_easy_clean_geometry,
     OBJECT_OT_easy_smart_apply,
+    OBJECT_OT_easy_random_materials,
+    OBJECT_MT_easy_radial_menu,
     OBJECT_OT_easy_ssharpen,
 ]
 
@@ -506,6 +650,8 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
     bpy.types.Scene.easy_utils_props = bpy.props.PointerProperty(type=EasyUtilsProperties)
+
+    register_shortcut()
 
 def unregister():
     for cls in classes:

@@ -1,5 +1,5 @@
 
-# EasyUtils & EasyOps for Blender 2.93+
+# EasyUtils & EasyOps for Blender 2.93/4.xx
 
 **EasyUtils & EasyOps** is a Blender add-on that provides a set of tools designed to make common mesh operations easier and faster. This includes auto-renaming, UV unwrapping, smart apply operations, booleans with automatic wireframe mode, geometry cleaning, and more. All boolean effectors are automatically moved to a dedicated collection called `EASYOPS_CUTS`.
 

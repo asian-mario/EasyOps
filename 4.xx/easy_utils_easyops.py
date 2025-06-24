@@ -1,334 +1,403 @@
 bl_info = {
     "name": "Easy Utils & EasyOps",
-    "blender": (4, 0, 0),
+    "author": "asianmario",
+    "version": (1, 2, 0),
+    "blender": (4, 4, 0),
+    "location": "View3D > Sidebar > Easy Utils",
+    "description": "A collection of modelling and cleanup utilities",
+    "warning": "",
+    "wiki_url": "",
+    "tracker_url": "",
     "category": "Object",
 }
 
 import bpy
+import random
 import bmesh
 import math
+from bpy.props import (
+    StringProperty,
+    FloatProperty,
+    BoolProperty,
+    EnumProperty,
+    PointerProperty,
+)
 
-# Custom Properties (can be modified by the user)
+
+# -------------------------------------------------------------------
+#    Properties
+# -------------------------------------------------------------------
+
 class EasyUtilsProperties(bpy.types.PropertyGroup):
-    rename_prefix: bpy.props.StringProperty(
+    rename_prefix: StringProperty(
         name="Rename Prefix",
         description="Prefix for auto-renaming objects and meshes",
         default="EO-"
     )
-    island_margin: bpy.props.FloatProperty(
+    island_margin: FloatProperty(
         name="Island Margin",
         description="Margin between UV islands for Smart UV Unwrap",
         default=0.02,
         min=0.0,
         max=1.0
     )
-    enable_auto_smooth: bpy.props.BoolProperty(
+    enable_auto_smooth: BoolProperty(
         name="Enable Auto Smooth",
-        description="Enable or disable Auto Smooth after applying Shade Smooth",
+        description="Enable Auto Smooth after applying Shade Smooth",
         default=False
     )
-    auto_smooth_angle: bpy.props.FloatProperty(
+    auto_smooth_angle: FloatProperty(
         name="Auto Smooth Angle",
         description="Angle for Auto Smooth (0 to 180 degrees)",
         default=30.0,
         min=0.0,
         max=180.0
     )
+    metallic_color_min: FloatProperty(
+        name="Metallic Min Intensity",
+        description="Minimum greyscale for metallic materials",
+        default=0.3,
+        min=0.0,
+        max=1.0
+    )
+    metallic_color_max: FloatProperty(
+        name="Metallic Max Intensity",
+        description="Maximum greyscale for metallic materials",
+        default=1.0,
+        min=0.0,
+        max=1.0
+    )
 
-# Panel in a Custom "Easy Utils" and "EasyOps" Tab
-class EasyUtilsPanel(bpy.types.Panel):
-    bl_label = "Easy Utils"
-    bl_idname = "OBJECT_PT_easy_utils"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = "Easy Utils"  # This creates a new tab in the 3D Viewport
 
-    def draw(self, context):
-        layout = self.layout
-        props = context.scene.easy_utils_props
+# -------------------------------------------------------------------
+#    Utility functions
+# -------------------------------------------------------------------
 
-        layout.prop(props, "rename_prefix")
-        layout.operator("object.easy_auto_rename", text="Auto Rename")
-        layout.separator()  # Adds a visual separator between buttons   
-        layout.operator("object.easy_ssharpen", text="SSharpen")
-        # Quick actions buttons
-        layout.label(text="Quick Actions:")
-        layout.prop(props, "island_margin")  # Add island margin setting for Smart UV Unwrap
-        layout.operator("object.easy_smart_uv_unwrap", text="Smart UV Unwrap")
-
-        # Shade Smooth and Auto Smooth Options
-        layout.prop(props, "enable_auto_smooth")  # Checkbox for Auto Smooth
-        layout.prop(props, "auto_smooth_angle")  # Angle input for Auto Smooth
-        layout.operator("object.easy_shade_smooth", text="Shade Smooth")
-        layout.operator("object.easy_remove_doubles", text="Remove Doubles (Merge by Distance)")
-
-# New EasyOps Panel
-class EasyOpsPanel(bpy.types.Panel):
-    bl_label = "EasyOps"
-    bl_idname = "OBJECT_PT_easy_ops"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = "Easy Utils"  # Same tab, different section
-
-    def draw(self, context):
-        layout = self.layout
-        obj = context.object
-
-        layout.label(text="Bevel & Boolean Operations")
-        layout.operator("object.easy_bevel", text="Bevel")
-        layout.operator("object.easy_boolean_difference", text="Boolean Difference")
-        layout.operator("object.easy_boolean_union", text="Boolean Union")
-        layout.operator("object.easy_boolean_intersect", text="Boolean Intersect")
-        layout.separator()
-        
-        layout.label(text="Modifiers and Cleanup")
-        layout.operator("object.easy_smart_decimate", text="Smart Decimate")
-        layout.operator("object.easy_sharpen_edges", text="Flat Shading")
-        layout.operator("object.easy_clean_geometry", text="Clean Geometry")
-        layout.operator("object.easy_smart_apply", text="Smart Apply")
-        
-        # Modifier adjustment section
-        if obj and obj.type == 'MESH':
-            layout.separator()
-            layout.label(text="Modifier Controls")
-
-            # Check for existing bevel modifier
-            for modifier in obj.modifiers:
-                if modifier.type == 'BEVEL':
-                    box = layout.box()
-                    box.label(text="Bevel Modifier")
-                    box.prop(modifier, "width")
-                    box.prop(modifier, "segments")
-                    box.prop(modifier, "profile")
-
-            # Check for existing decimate modifier
-            for modifier in obj.modifiers:
-                if modifier.type == 'DECIMATE':
-                    box = layout.box()
-                    box.label(text="Decimate Modifier")
-                    box.prop(modifier, "ratio")
-
-# Utility function to get all mesh objects if none are selected
 def get_target_objects(context):
-    selected_objects = context.selected_objects
-    if len(selected_objects) == 0:
-        # If no objects are selected, return all mesh objects
-        return [obj for obj in context.scene.objects if obj.type == 'MESH']
-    return selected_objects
-
-# Operator to Apply Shade Smooth to All Meshes
-class OBJECT_OT_easy_shade_smooth(bpy.types.Operator):
-    bl_label = "Shade Smooth"
-    bl_idname = "object.easy_shade_smooth"
-    bl_description = "Applies Shade Smooth to all selected mesh objects. If no objects are selected, applies to all mesh objects. Optionally enables Auto Smooth with a custom angle."
-
-    def execute(self, context):
-        props = context.scene.easy_utils_props
-        target_objects = get_target_objects(context)
-        
-        for obj in target_objects:
-            if obj.type == 'MESH':
-                obj.select_set(True)
-                bpy.context.view_layer.objects.active = obj
-                
-                # Apply Shade Smooth
-                bpy.ops.object.shade_smooth()
-
-                # Optionally enable Auto Smooth and set the Auto Smooth Angle
-                if props.enable_auto_smooth:
-                    obj.data.use_auto_smooth = True
-                    # Convert the Auto Smooth Angle to radians
-                    obj.data.auto_smooth_angle = math.radians(props.auto_smooth_angle)
-
-                obj.select_set(False)
-
-        self.report({'INFO'}, "Shade Smooth applied to selected/all mesh objects.")
-        return {'FINISHED'}
-
-# Operator to Perform Smart UV Unwrap on All Meshes
-class OBJECT_OT_easy_smart_uv_unwrap(bpy.types.Operator):
-    bl_label = "Smart UV Unwrap"
-    bl_idname = "object.easy_smart_uv_unwrap"
-    bl_description = "Performs a Smart UV Unwrap on all selected mesh objects. If no objects are selected, applies to all mesh objects. Supports an adjustable island margin."
-
-    def execute(self, context):
-        props = context.scene.easy_utils_props
-        island_margin = props.island_margin
-        target_objects = get_target_objects(context)
-        
-        for obj in target_objects:
-            if obj.type == 'MESH':
-                bpy.context.view_layer.objects.active = obj
-                bpy.ops.object.mode_set(mode='EDIT')
-                bpy.ops.uv.smart_project(island_margin=island_margin)
-                bpy.ops.object.mode_set(mode='OBJECT')
-
-        self.report({'INFO'}, f"Smart UV Unwrap applied with {island_margin} margin.")
-        return {'FINISHED'}
-
-# Operator to Auto-Rename Meshes and Objects
-class OBJECT_OT_easy_auto_rename(bpy.types.Operator):
-    bl_label = "Auto Rename Objects and Meshes"
-    bl_idname = "object.easy_auto_rename"
-    bl_description = "Automatically renames all mesh objects and their meshes using a custom prefix. If no objects are selected, applies to all mesh objects."
-
-    def execute(self, context):
-        props = context.scene.easy_utils_props
-        rename_prefix = props.rename_prefix
-        
-        n = 1
-        target_objects = get_target_objects(context)
-        sorted_objects = sorted(target_objects, key=lambda obj: obj.location.z, reverse=True)
-        
-        for obj in sorted_objects:
-            if obj.type == 'MESH':
-                obj.name = f"{rename_prefix}{n}"
-                obj.data.name = f"{rename_prefix}{n}"
-                n += 1
-
-        self.report({'INFO'}, "Objects and meshes renamed successfully.")
-        return {'FINISHED'}
-
-# --- EasyOps Section ---
-
-# Bevel operator
-class OBJECT_OT_easy_bevel(bpy.types.Operator):
-    bl_label = "Bevel"
-    bl_idname = "object.easy_bevel"
-    bl_description = "Adds a bevel modifier with default settings."
-
-    def execute(self, context):
-        target_objects = get_target_objects(context)
-        for obj in target_objects:
-            if obj.type == 'MESH':
-                # Check if there's already a Bevel modifier
-                if not any(mod.type == 'BEVEL' for mod in obj.modifiers):
-                    modifier = obj.modifiers.new(name="Bevel", type='BEVEL')
-                    modifier.width = 0.02
-                    modifier.segments = 3
-                    modifier.profile = 0.7
-        self.report({'INFO'}, "Bevel applied to selected/all mesh objects.")
-        return {'FINISHED'}
+    objs = context.selected_objects
+    if not objs:
+        return [o for o in context.scene.objects if o.type == 'MESH']
+    return objs
 
 def turn_into_wireframe(obj):
-    # Set the object to display as wireframe in the viewport
     obj.display_type = 'WIRE'
-    
-    # Check if the collection 'EASYOPS_CUTS' exists, if not, create it
+    # Ensure collection exists
     if "EASYOPS_CUTS" not in bpy.data.collections:
-        new_collection = bpy.data.collections.new("EASYOPS_CUTS")
-        bpy.context.scene.collection.children.link(new_collection)
+        col = bpy.data.collections.new("EASYOPS_CUTS")
+        context = bpy.context
+        context.scene.collection.children.link(col)
+    cuts = bpy.data.collections["EASYOPS_CUTS"]
+    # Move object into that collection
+    for col in list(obj.users_collection):
+        col.objects.unlink(obj)
+    cuts.objects.link(obj)
 
-    # Get the EASYOPS_CUTS collection
-    cuts_collection = bpy.data.collections["EASYOPS_CUTS"]
 
-    # If the object is already in a collection, unlink it from the original collection
-    for collection in obj.users_collection:
-        collection.objects.unlink(obj)
+# -------------------------------------------------------------------
+#    Operators
+# -------------------------------------------------------------------
 
-    # Link the object to the 'EASYOPS_CUTS' collection
-    cuts_collection.objects.link(obj)
+class OBJECT_OT_easy_random_materials(bpy.types.Operator):
+    """Assign Random Materials to Selected Objects"""
+    bl_idname = "object.assign_random_materials"
+    bl_label = "Assign Random Materials"
+    bl_options = {'REGISTER', 'UNDO'}
 
-# Boolean operations
-class OBJECT_OT_easy_boolean_difference(bpy.types.Operator):
-    bl_label = "Boolean Difference"
-    bl_idname = "object.easy_boolean_difference"
-    bl_description = "Performs a Boolean Difference operation with the active object."
+    mode: EnumProperty(
+        name="Mode",
+        description="Randomization mode",
+        items=[
+            ('BASIC', "Basic", "Random colors"),
+            ('METALLIC', "Metallic", "Greyscale metallic"),
+        ],
+        default='BASIC'
+    )
+
+    @staticmethod
+    def assign_viewport_display_color(mat, color):
+        mat.diffuse_color = (*color, 1.0)
 
     def execute(self, context):
-        target_objects = get_target_objects(context)
-        active_obj = context.view_layer.objects.active
-        
-        for obj in target_objects:
-            if obj.type == 'MESH' and obj != active_obj:
-                modifier = obj.modifiers.new(name="Boolean Difference", type='BOOLEAN')
-                modifier.operation = 'DIFFERENCE'
-                modifier.object = active_obj
+        targets = get_target_objects(context)
+        if not targets:
+            self.report({'WARNING'}, "No mesh objects found")
+            return {'CANCELLED'}
 
-        turn_into_wireframe(active_obj)
+        for obj in targets:
+            if obj.type == 'MESH':
+                mat = bpy.data.materials.new("RandomMaterial")
+                mat.use_nodes = True
+                bsdf = mat.node_tree.nodes.get("Principled BSDF")
 
+                if self.mode == 'BASIC':
+                    col = [random.random() for _ in range(3)]
+                    metallic = 0.0
+                else:
+                    grey = random.uniform(
+                        context.scene.easy_utils_props.metallic_color_min,
+                        context.scene.easy_utils_props.metallic_color_max
+                    )
+                    col = [grey] * 3
+                    metallic = 1.0
+
+                bsdf.inputs["Base Color"].default_value = (*col, 1.0)
+                bsdf.inputs["Metallic"].default_value = metallic
+
+                obj.data.materials.clear()
+                obj.data.materials.append(mat)
+                self.assign_viewport_display_color(mat, col)
+
+        self.report({'INFO'}, f"Random materials ({self.mode}) assigned.")
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+
+class OBJECT_OT_easy_shade_smooth(bpy.types.Operator):
+    """Shade Smooth + optional Auto Smooth"""
+    bl_idname = "object.easy_shade_smooth"
+    bl_label = "Shade Smooth"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        props = context.scene.easy_utils_props
+        for obj in get_target_objects(context):
+            if obj.type == 'MESH':
+                obj.select_set(True)
+                context.view_layer.objects.active = obj
+                bpy.ops.object.shade_smooth()
+                if props.enable_auto_smooth:
+                    obj.data.use_auto_smooth = True
+                    obj.data.auto_smooth_angle = math.radians(props.auto_smooth_angle)
+                obj.select_set(False)
+        self.report({'INFO'}, "Shade Smooth complete.")
+        return {'FINISHED'}
+
+
+class OBJECT_OT_easy_smart_uv_unwrap(bpy.types.Operator):
+    """Smart UV Unwrap with adjustable margin"""
+    bl_idname = "object.easy_smart_uv_unwrap"
+    bl_label = "Smart UV Unwrap"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        margin = context.scene.easy_utils_props.island_margin
+        for obj in get_target_objects(context):
+            if obj.type == 'MESH':
+                context.view_layer.objects.active = obj
+                bpy.ops.object.mode_set(mode='EDIT')
+                bpy.ops.uv.smart_project(island_margin=margin)
+                bpy.ops.object.mode_set(mode='OBJECT')
+        self.report({'INFO'}, f"Unwrapped with margin {margin:.3f}")
+        return {'FINISHED'}
+
+
+class OBJECT_OT_easy_auto_rename(bpy.types.Operator):
+    """Auto-rename mesh objects & their data"""
+    bl_idname = "object.easy_auto_rename"
+    bl_label = "Auto Rename"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        prefix = context.scene.easy_utils_props.rename_prefix
+        targets = sorted(get_target_objects(context),
+                         key=lambda o: o.location.z, reverse=True)
+        count = 1
+        for obj in targets:
+            if obj.type == 'MESH':
+                obj.name = f"{prefix}{count}"
+                obj.data.name = f"{prefix}{count}"
+                count += 1
+        self.report({'INFO'}, "Renaming complete.")
+        return {'FINISHED'}
+
+
+class OBJECT_OT_easy_remove_doubles(bpy.types.Operator):
+    """Merge verts by distance on meshes"""
+    bl_idname = "object.easy_remove_doubles"
+    bl_label = "Remove Doubles"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        for obj in get_target_objects(context):
+            if obj.type == 'MESH':
+                context.view_layer.objects.active = obj
+                bpy.ops.object.mode_set(mode='EDIT')
+                bpy.ops.mesh.select_all(action='SELECT')
+                bpy.ops.mesh.merge_by_distance()
+                bpy.ops.object.mode_set(mode='OBJECT')
+        self.report({'INFO'}, "Merge by distance done.")
+        return {'FINISHED'}
+
+
+class OBJECT_OT_easy_clean_geometry(bpy.types.Operator):
+    """Clean loose & degenerate geometry"""
+    bl_idname = "object.easy_clean_geometry"
+    bl_label = "Clean Geometry"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        for obj in get_target_objects(context):
+            if obj.type == 'MESH':
+                context.view_layer.objects.active = obj
+                bpy.ops.object.mode_set(mode='EDIT')
+                bpy.ops.mesh.select_all(action='SELECT')
+                bpy.ops.mesh.merge_by_distance()
+                bpy.ops.mesh.delete_loose()
+                bpy.ops.mesh.dissolve_degenerate()
+                bpy.ops.object.mode_set(mode='OBJECT')
+        self.report({'INFO'}, "Geometry cleaned.")
+        return {'FINISHED'}
+
+
+class OBJECT_OT_easy_bevel(bpy.types.Operator):
+    """Add a Bevel modifier"""
+    bl_idname = "object.easy_bevel"
+    bl_label = "Bevel"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        for obj in get_target_objects(context):
+            if obj.type == 'MESH' and not any(m.type=='BEVEL' for m in obj.modifiers):
+                mod = obj.modifiers.new("Bevel", 'BEVEL')
+                mod.width = 0.02
+                mod.segments = 3
+                mod.profile = 0.7
+        self.report({'INFO'}, "Bevel modifier added.")
+        return {'FINISHED'}
+
+
+class OBJECT_OT_easy_boolean_difference(bpy.types.Operator):
+    """Boolean Difference"""
+    bl_idname = "object.easy_boolean_difference"
+    bl_label = "Boolean Difference"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        active = context.view_layer.objects.active
+        for obj in get_target_objects(context):
+            if obj.type == 'MESH' and obj is not active:
+                mod = obj.modifiers.new("Boolean Difference", 'BOOLEAN')
+                mod.operation = 'DIFFERENCE'
+                mod.object = active
+        turn_into_wireframe(active)
         self.report({'INFO'}, "Boolean Difference applied.")
         return {'FINISHED'}
 
-    
+
 class OBJECT_OT_easy_boolean_union(bpy.types.Operator):
-    bl_label = "Boolean Union"
+    """Boolean Union"""
     bl_idname = "object.easy_boolean_union"
-    bl_description = "Performs a Boolean Union operation with the active object."
+    bl_label = "Boolean Union"
+    bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        target_objects = get_target_objects(context)
-        active_obj = context.view_layer.objects.active
-        
-        for obj in target_objects:
-            if obj.type == 'MESH' and obj != active_obj:
-                modifier = obj.modifiers.new(name="Boolean Union", type='BOOLEAN')
-                modifier.operation = 'UNION'
-                modifier.object = active_obj
-
-        turn_into_wireframe(active_obj)
+        active = context.view_layer.objects.active
+        for obj in get_target_objects(context):
+            if obj.type == 'MESH' and obj is not active:
+                mod = obj.modifiers.new("Boolean Union", 'BOOLEAN')
+                mod.operation = 'UNION'
+                mod.object = active
+        turn_into_wireframe(active)
         self.report({'INFO'}, "Boolean Union applied.")
         return {'FINISHED'}
 
+
 class OBJECT_OT_easy_boolean_intersect(bpy.types.Operator):
-    bl_label = "Boolean Intersect"
+    """Boolean Intersect"""
     bl_idname = "object.easy_boolean_intersect"
-    bl_description = "Performs a Boolean Intersect operation with the active object."
+    bl_label = "Boolean Intersect"
+    bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        target_objects = get_target_objects(context)
-        active_obj = context.view_layer.objects.active
-        
-        for obj in target_objects:
-            if obj.type == 'MESH' and obj != active_obj:
-                modifier = obj.modifiers.new(name="Boolean Intersect", type='BOOLEAN')
-                modifier.operation = 'INTERSECT'
-                modifier.object = active_obj
-
-        turn_into_wireframe(active_obj)
+        active = context.view_layer.objects.active
+        for obj in get_target_objects(context):
+            if obj.type == 'MESH' and obj is not active:
+                mod = obj.modifiers.new("Boolean Intersect", 'BOOLEAN')
+                mod.operation = 'INTERSECT'
+                mod.object = active
+        turn_into_wireframe(active)
         self.report({'INFO'}, "Boolean Intersect applied.")
         return {'FINISHED'}
-    
-#--- Smart Apply for Boolean Modifiers ---
-def smart_apply(obj):
-    # Apply all boolean modifiers but leave other modifiers intact
-    for modifier in obj.modifiers:
-        if modifier.type == 'BOOLEAN':
-            bpy.context.view_layer.objects.active = obj
-            bpy.ops.object.modifier_apply(modifier=modifier.name)
+
 
 class OBJECT_OT_easy_smart_apply(bpy.types.Operator):
-    bl_label = "Smart Apply"
+    """Apply only boolean modifiers"""
     bl_idname = "object.easy_smart_apply"
-    bl_description = "Applies all boolean modifiers on the selected object but preserves other modifiers."
+    bl_label = "Smart Apply"
+    bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        target_objects = get_target_objects(context)
-
-        for obj in target_objects:
+        for obj in get_target_objects(context):
             if obj.type == 'MESH':
-                smart_apply(obj)  # Call the smart apply function
-        
-        self.report({'INFO'}, "Smart Apply completed for boolean modifiers.")
+                for mod in list(obj.modifiers):
+                    if mod.type == 'BOOLEAN':
+                        context.view_layer.objects.active = obj
+                        bpy.ops.object.modifier_apply(modifier=mod.name)
+        self.report({'INFO'}, "Boolean modifiers applied.")
         return {'FINISHED'}
 
-# Smart Decimate operator
+
 class OBJECT_OT_easy_smart_decimate(bpy.types.Operator):
-    bl_label = "Smart Decimate"
+    """Add Decimate modifier"""
     bl_idname = "object.easy_smart_decimate"
-    bl_description = "Adds a decimate modifier to reduce the polygon count."
+    bl_label = "Smart Decimate"
+    bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        target_objects = get_target_objects(context)
-        for obj in target_objects:
-            if obj.type == 'MESH':
-                # Check if there's already a Decimate modifier
-                if not any(mod.type == 'DECIMATE' for mod in obj.modifiers):
-                    modifier = obj.modifiers.new(name="Decimate", type='DECIMATE')
-                    modifier.ratio = 0.5  # Adjust reduction factor
-
-        self.report({'INFO'}, "Decimate applied to reduce polygon count.")
+        for obj in get_target_objects(context):
+            if obj.type == 'MESH' and not any(m.type=='DECIMATE' for m in obj.modifiers):
+                mod = obj.modifiers.new("Decimate", 'DECIMATE')
+                mod.ratio = 0.5
+        self.report({'INFO'}, "Decimate modifier added.")
         return {'FINISHED'}
+
+
+def detect_sharp_edges(obj, angle_threshold=30):
+    thresh = math.radians(angle_threshold)
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode='EDIT')
+    bm = bmesh.from_edit_mesh(obj.data)
+    for e in bm.edges:
+        if e.is_manifold and len(e.link_faces)==2:
+            angle = e.link_faces[0].normal.angle(e.link_faces[1].normal)
+            if angle > thresh:
+                e.smooth = False
+                e.seam = True
+    bmesh.update_edit_mesh(obj.data)
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.transform.edge_bevelweight(value=1.0)
+    bpy.ops.transform.edge_crease(value=1.0)
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+def apply_bevel_modifier(obj):
+    bevel = next((m for m in obj.modifiers if m.type=='BEVEL'), None)
+    if not bevel:
+        bevel = obj.modifiers.new("Bevel", 'BEVEL')
+    bevel.width = 0.02
+    bevel.segments = 3
+    bevel.limit_method = 'WEIGHT'
+
+def enable_auto_smooth(obj, angle=30):
+    obj.data.use_auto_smooth = True
+    obj.data.auto_smooth_angle = math.radians(angle)
+
+class OBJECT_OT_easy_ssharpen(bpy.types.Operator):
+    """Smart Sharpen: detect, bevel & auto-smooth"""
+    bl_idname = "object.easy_ssharpen"
+    bl_label = "SSharpen"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        for obj in get_target_objects(context):
+            if obj.type == 'MESH':
+                detect_sharp_edges(obj)
+                apply_bevel_modifier(obj)
+                enable_auto_smooth(obj)
+        self.report({'INFO'}, "SSharpen complete.")
+        return {'FINISHED'}
+    
 
 # Sharpen edges operator
 class OBJECT_OT_easy_sharpen_edges(bpy.types.Operator):
@@ -346,163 +415,174 @@ class OBJECT_OT_easy_sharpen_edges(bpy.types.Operator):
         self.report({'INFO'}, "Sharp edges marked on selected/all objects.")
         return {'FINISHED'}
 
-# Clean geometry operator
-class OBJECT_OT_easy_clean_geometry(bpy.types.Operator):
-    bl_label = "Clean Geometry"
-    bl_idname = "object.easy_clean_geometry"
-    bl_description = "Cleans loose geometry, removes doubles (merges vertices by distance), and dissolves degenerate faces."
 
-    def execute(self, context):
-        target_objects = get_target_objects(context)
-        for obj in target_objects:
-            if obj.type == 'MESH':
-                bpy.context.view_layer.objects.active = obj
-                bpy.ops.object.mode_set(mode='EDIT')
+# -------------------------------------------------------------------
+#    UI: Panels & Menus
+# -------------------------------------------------------------------
 
-                # Merge by Distance (Equivalent to Remove Doubles for Blender 4.x)
-                bpy.ops.mesh.select_all(action='SELECT')
-                bpy.ops.mesh.merge_by_distance()  # Updated for Blender 4.x
+class OBJECT_MT_easy_radial_menu(bpy.types.Menu):
+    bl_idname = "OBJECT_MT_easy_ops_radial_menu"
+    bl_label = "EasyOps Radial Menu"
 
-                # Delete loose geometry
-                bpy.ops.mesh.delete_loose()
+    def draw(self, context):
+        pie = self.layout.menu_pie()
+        sel = context.selected_objects
 
-                # Dissolve degenerate geometry
-                bpy.ops.mesh.dissolve_degenerate()
+        if len(sel) == 1:
+            # primary slots
+            pie.operator("object.easy_bevel",           icon='MOD_BEVEL')
+            pie.operator("object.easy_sharpen_edges",   icon='MOD_SHRINKWRAP')
+            pie.operator("object.easy_smart_uv_unwrap", icon='UV')
 
-                bpy.ops.object.mode_set(mode='OBJECT')
+            # extra tools grouped in the Up slice
+            col = pie.column(align=True)
+            col.label(text="More…", icon='PLUS')
+            col.operator("object.easy_clean_geometry",    icon='CLEAN_CHANNELS')
+            col.operator("object.easy_remove_doubles",    icon='X')
+            col.operator("object.easy_smart_apply",       icon='CHECKMARK')
+            col.operator("object.assign_random_materials",icon='MATERIAL')
+            col.operator("object.easy_auto_rename",       icon='OUTLINER_OB_GROUP_INSTANCE')
 
-        self.report({'INFO'}, "Cleaned geometry on selected/all objects.")
-        return {'FINISHED'}
+        elif len(sel) == 2:
+            # primary slots
+            pie.operator("object.easy_boolean_difference", icon='MOD_BOOLEAN')
+            pie.operator("object.easy_boolean_union",      icon='MOD_BOOLEAN')
+            pie.operator("object.easy_boolean_intersect",  icon='MOD_BOOLEAN')
 
-# Operator to Remove Doubles (Merge by Distance) on All Meshes
-class OBJECT_OT_easy_remove_doubles(bpy.types.Operator):
-    bl_label = "Remove Doubles (Merge by Distance)"
-    bl_idname = "object.easy_remove_doubles"
-    bl_description = "Removes doubles by merging vertices by distance for all selected mesh objects. If no objects are selected, applies to all mesh objects."
+            # extra tools grouped in the Up slice
+            col = pie.column(align=True)
+            col.label(text="More…", icon='PLUS')
+            col.operator("object.easy_clean_geometry",     icon='CLEAN_CHANNELS')
+            col.operator("object.easy_remove_doubles",     icon='X')
+            col.operator("object.easy_smart_apply",        icon='CHECKMARK')
+            col.operator("object.easy_smart_uv_unwrap",    icon='UV')
+            col.operator("object.easy_auto_rename",        icon='OUTLINER_OB_GROUP_INSTANCE')
 
-    def execute(self, context):
-        target_objects = get_target_objects(context)
-        for obj in target_objects:
-            if obj.type == 'MESH':
-                bpy.context.view_layer.objects.active = obj
-                bpy.ops.object.mode_set(mode='EDIT')
-                bpy.ops.mesh.select_all(action='SELECT')
-                bpy.ops.mesh.merge_by_distance()  # Updated for Blender 4.x
-                bpy.ops.object.mode_set(mode='OBJECT')
+        else:
+            pie.label(text="Select 1–2 meshes", icon='INFO')
 
-        self.report({'INFO'}, "Doubles removed from selected/all mesh objects.")
-        return {'FINISHED'}
 
-# Detect and mark sharp edges with customizable angle threshold
-def detect_sharp_edges(obj, angle_threshold=30):
-    angle_threshold_rad = math.radians(angle_threshold)
-    
-    # Ensure the object is in edit mode
-    bpy.context.view_layer.objects.active = obj
-    bpy.ops.object.mode_set(mode='EDIT')
-    
-    # Create a BMesh for edge detection
-    bm = bmesh.from_edit_mesh(obj.data)
-    
-    # Loop through all edges
-    for edge in bm.edges:
-        if not edge.is_manifold:  # Skip non-manifold edges
-            continue
-        
-        # Get the faces adjacent to this edge
-        linked_faces = edge.link_faces
-        
-        # Ensure the edge is between two faces
-        if len(linked_faces) == 2:
-            # Calculate the angle between the faces
-            angle = linked_faces[0].normal.angle(linked_faces[1].normal)
-            
-            # Mark sharp if the angle exceeds the threshold
-            if angle > angle_threshold_rad:
-                edge.smooth = False  # Mark as sharp (affects shading)
-                edge.seam = True  # Optional: mark as seam for UVs too
-    
-    # Update the BMesh
-    bmesh.update_edit_mesh(obj.data)
 
-    # Apply bevel weight to selected edges
-    bpy.ops.mesh.select_all(action='SELECT')
-    bpy.ops.transform.edge_bevelweight(value=1.0)  # Apply maximum bevel weight
-    
-    # Apply crease weight to selected edges (optional, can be toggled by user)
-    bpy.ops.transform.edge_crease(value=1.0)  # Apply full creasing
+addon_keymaps = []
 
-    # Return to object mode
-    bpy.ops.object.mode_set(mode='OBJECT')
+def register_shortcut():
+    kc = bpy.context.window_manager.keyconfigs.addon
+    if kc:
+        km = kc.keymaps.new(name='Object Mode', space_type='EMPTY')
+        kmi = km.keymap_items.new("wm.call_menu_pie", 'Z', 'PRESS', shift=True)
+        kmi.properties.name = OBJECT_MT_easy_radial_menu.bl_idname
+        addon_keymaps.append((km, kmi))
 
-# Add or update bevel modifier for smart sharpening
-def apply_bevel_modifier(obj):
-    # Check if a bevel modifier exists; if not, create one
-    bevel_mod = next((mod for mod in obj.modifiers if mod.type == 'BEVEL'), None)
-    
-    if bevel_mod is None:
-        # Create a new bevel modifier
-        bevel_mod = obj.modifiers.new(name="Bevel", type='BEVEL')
-    
-    # Set bevel parameters
-    bevel_mod.width = 0.02  # Adjust width as needed
-    bevel_mod.segments = 3  # Adjust segments as needed
-    bevel_mod.limit_method = 'WEIGHT'  # Use weight for bevel control
+def unregister_shortcut():
+    for km, kmi in addon_keymaps:
+        km.keymap_items.remove(kmi)
+    addon_keymaps.clear()
 
-# Enable auto smooth with user-defined angle
-def enable_auto_smooth(obj, smooth_angle=30):
-    obj.data.use_auto_smooth = True
-    obj.data.auto_smooth_angle = math.radians(smooth_angle)
 
-# Main SSharpen operator
-class OBJECT_OT_easy_ssharpen(bpy.types.Operator):
-    bl_label = "SSharpen"
-    bl_idname = "object.easy_ssharpen"
-    bl_description = "Detect sharp edges based on angle, apply bevel and crease, and enable auto smooth."
+class EasyUtilsPanel(bpy.types.Panel):
+    """Easy Utils Tools"""
+    bl_label = "Easy Utils"
+    bl_idname = "OBJECT_PT_easy_utils"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Easy Utils"
 
-    def execute(self, context):
-        target_objects = get_target_objects(context)  # Assuming this function gets selected or all objects
-        for obj in target_objects:
-            if obj.type == 'MESH':
-                # Detect sharp edges based on angle
-                detect_sharp_edges(obj, angle_threshold=30)  # You can expose this as a parameter
-                
-                # Apply bevel modifier for sharp edges
-                apply_bevel_modifier(obj)
-                
-                # Enable auto smooth to maintain smooth surfaces
-                enable_auto_smooth(obj, smooth_angle=30)  # You can expose this as a parameter
-        
-        self.report({'INFO'}, "SSharpen applied to selected/all objects.")
-        return {'FINISHED'}
+    def draw(self, context):
+        layout = self.layout
+        props = context.scene.easy_utils_props
 
-# Register and Unregister Classes
+        layout.prop(props, "rename_prefix")
+        layout.operator("object.easy_auto_rename")
+        layout.separator()
+        layout.operator("object.easy_ssharpen", text="SSharpen")
+        layout.label(text="Random Materials:")
+        layout.operator("object.assign_random_materials")
+        layout.prop(props, "metallic_color_min")
+        layout.prop(props, "metallic_color_max")
+
+        layout.separator()
+        layout.prop(props, "island_margin")
+        layout.operator("object.easy_smart_uv_unwrap")
+        layout.prop(props, "enable_auto_smooth")
+        layout.prop(props, "auto_smooth_angle")
+        layout.operator("object.easy_shade_smooth")
+        layout.operator("object.easy_remove_doubles")
+
+
+class EasyOpsPanel(bpy.types.Panel):
+    """EasyOps Boolean & Cleanup"""
+    bl_label = "EasyOps"
+    bl_idname = "OBJECT_PT_easy_ops"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Easy Utils"
+
+    def draw(self, context):
+        layout = self.layout
+        obj = context.object
+
+        layout.label(text="Bevel & Booleans")
+        layout.operator("object.easy_bevel")
+        layout.operator("object.easy_boolean_difference")
+        layout.operator("object.easy_boolean_union")
+        layout.operator("object.easy_boolean_intersect")
+        layout.separator()
+        layout.label(text="Modifiers & Cleanup")
+        layout.operator("object.easy_smart_decimate")
+        layout.operator("object.easy_sharpen_edges", text="Flat Shading")
+        layout.operator("object.easy_clean_geometry")
+        layout.operator("object.easy_smart_apply")
+
+        if obj and obj.type=='MESH':
+            layout.separator()
+            layout.label(text="Modifier Controls")
+            for m in obj.modifiers:
+                if m.type=='BEVEL':
+                    box = layout.box()
+                    box.label(text="Bevel Modifier")
+                    box.prop(m, "width")
+                    box.prop(m, "segments")
+                    box.prop(m, "profile")
+                if m.type=='DECIMATE':
+                    box = layout.box()
+                    box.label(text="Decimate Modifier")
+                    box.prop(m, "ratio")
+
+
+# -------------------------------------------------------------------
+#    Registration
+# -------------------------------------------------------------------
+
 classes = [
     EasyUtilsProperties,
-    EasyUtilsPanel,
-    EasyOpsPanel,
-    OBJECT_OT_easy_auto_rename,
-    OBJECT_OT_easy_smart_uv_unwrap,
+    OBJECT_OT_easy_random_materials,
     OBJECT_OT_easy_shade_smooth,
+    OBJECT_OT_easy_smart_uv_unwrap,
+    OBJECT_OT_easy_auto_rename,
     OBJECT_OT_easy_remove_doubles,
+    OBJECT_OT_easy_clean_geometry,
     OBJECT_OT_easy_bevel,
     OBJECT_OT_easy_boolean_difference,
     OBJECT_OT_easy_boolean_union,
     OBJECT_OT_easy_boolean_intersect,
+    OBJECT_OT_easy_smart_apply,
     OBJECT_OT_easy_smart_decimate,
     OBJECT_OT_easy_sharpen_edges,
-    OBJECT_OT_easy_clean_geometry,
-    OBJECT_OT_easy_smart_apply,
     OBJECT_OT_easy_ssharpen,
+    OBJECT_MT_easy_radial_menu,
+    EasyUtilsPanel,
+    EasyOpsPanel,
 ]
 
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
-    bpy.types.Scene.easy_utils_props = bpy.props.PointerProperty(type=EasyUtilsProperties)
+    bpy.types.Scene.easy_utils_props = PointerProperty(type=EasyUtilsProperties)
+    register_shortcut()
 
 def unregister():
-    for cls in classes:
+    unregister_shortcut()
+    for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
     del bpy.types.Scene.easy_utils_props
 

@@ -422,41 +422,26 @@ class OBJECT_OT_easy_sharpen_edges(bpy.types.Operator):
 
 class OBJECT_MT_easy_radial_menu(bpy.types.Menu):
     bl_idname = "OBJECT_MT_easy_ops_radial_menu"
-    bl_label = "EasyOps Radial Menu"
+    bl_label = "EasyOps"
 
     def draw(self, context):
         pie = self.layout.menu_pie()
         sel = context.selected_objects
 
         if len(sel) == 1:
-            # primary slots
-            pie.operator("object.easy_bevel",           icon='MOD_BEVEL')
-            pie.operator("object.easy_sharpen_edges",   icon='MOD_SHRINKWRAP')
-            pie.operator("object.easy_smart_uv_unwrap", icon='UV')
+            pie.operator("object.easy_bevel",             icon='MOD_BEVEL')
+            pie.operator("object.easy_sharpen_edges",     icon='MOD_SHRINKWRAP')
+            pie.operator("object.easy_smart_apply",       icon='CHECKMARK')
+            pie.operator("object.easy_smart_uv_unwrap",   icon='UV')
+            pie.operator("object.easy_clean_geometry",    icon='CLEAN_CHANNELS')
+            pie.operator("object.easy_remove_doubles",    icon='X')
+            pie.operator("object.assign_random_materials",icon='MATERIAL')
 
-            # extra tools grouped in the Up slice
-            col = pie.column(align=True)
-            col.label(text="More…", icon='PLUS')
-            col.operator("object.easy_clean_geometry",    icon='CLEAN_CHANNELS')
-            col.operator("object.easy_remove_doubles",    icon='X')
-            col.operator("object.easy_smart_apply",       icon='CHECKMARK')
-            col.operator("object.assign_random_materials",icon='MATERIAL')
-            col.operator("object.easy_auto_rename",       icon='OUTLINER_OB_GROUP_INSTANCE')
-
-        elif len(sel) == 2:
-            # primary slots
-            pie.operator("object.easy_boolean_difference", icon='MOD_BOOLEAN')
-            pie.operator("object.easy_boolean_union",      icon='MOD_BOOLEAN')
-            pie.operator("object.easy_boolean_intersect",  icon='MOD_BOOLEAN')
-
-            # extra tools grouped in the Up slice
-            col = pie.column(align=True)
-            col.label(text="More…", icon='PLUS')
-            col.operator("object.easy_clean_geometry",     icon='CLEAN_CHANNELS')
-            col.operator("object.easy_remove_doubles",     icon='X')
-            col.operator("object.easy_smart_apply",        icon='CHECKMARK')
-            col.operator("object.easy_smart_uv_unwrap",    icon='UV')
-            col.operator("object.easy_auto_rename",        icon='OUTLINER_OB_GROUP_INSTANCE')
+        elif len(sel) >= 2:
+            pie.operator("object.easy_boolean_difference",icon='MOD_BOOLEAN')
+            pie.operator("object.easy_boolean_union",     icon='MOD_BOOLEAN')
+            pie.operator("object.easy_boolean_intersect", icon='MOD_BOOLEAN')
+            pie.operator("object.easy_smart_uv_unwrap",   icon='UV')
 
         else:
             pie.label(text="Select 1–2 meshes", icon='INFO')

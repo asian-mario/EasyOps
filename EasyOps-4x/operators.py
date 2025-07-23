@@ -2,6 +2,8 @@ import bpy
 import bmesh
 import gpu
 import bgl
+import random
+import math
 from gpu_extras.batch import batch_for_shader
 from mathutils import Vector, Matrix
 from bpy_extras import view3d_utils
@@ -349,7 +351,8 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         default=True
     )
     
-    def __init__(self):
+    def invoke(self, context, event):
+        # Initialize instance variables here instead of in __init__
         self.points = []
         self.mouse_pos = Vector((0, 0))
         self.drawing = False
@@ -357,7 +360,6 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         self.target_objects = []
         self.preview_mesh = None
         
-    def invoke(self, context, event):
         if context.area.type == 'VIEW_3D':
             # Get target objects
             self.target_objects = [obj for obj in context.selected_objects if obj.type == 'MESH']

@@ -455,34 +455,35 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         bm = bmesh.new()
         
         # Add vertices from points
-        verts = []
-        for point in self.points:
-            vert = bm.verts.new(point)
-            verts.append(vert)
-        
-        # Create face from vertices
-        bm.faces.new(verts)
-        
-        # Extrude the face
+        verts = [bm.verts.new(pt) for pt in self.points]
+
+        # Create and store the face, then ensure lookup
+        face = bm.faces.new(verts)
+        bm.faces.ensure_lookup_table()
+
+        # Extrude outwards/inwards from that face
         if self.both_directions:
-            # Extrude in both directions
-            extruded = bmesh.ops.extrude_face_region(bm, geom=[bm.faces[-1]])
-            bmesh.ops.translate(bm, 
-                               vec=(0, 0, self.extrude_depth/2), 
-                               verts=[v for v in extruded['geom'] if isinstance(v, bmesh.types.BMVert)])
-            
-            # Extrude in opposite direction
-            extruded = bmesh.ops.extrude_face_region(bm, geom=[bm.faces[0]])
-            bmesh.ops.translate(bm, 
-                               vec=(0, 0, -self.extrude_depth/2), 
-                               verts=[v for v in extruded['geom'] if isinstance(v, bmesh.types.BMVert)])
+            # forward extrusion
+            extrude1 = bmesh.ops.extrude_face_region(bm, geom=[face])
+            verts1  = [e for e in extrude1['geom'] if isinstance(e, bmesh.types.BMVert)]
+            bmesh.ops.translate(bm,
+                                vec=(0, 0, self.extrude_depth/2),
+                                verts=verts1)
+
+            # reverse extrusion
+            extrude2 = bmesh.ops.extrude_face_region(bm, geom=[face])
+            verts2  = [e for e in extrude2['geom'] if isinstance(e, bmesh.types.BMVert)]
+            bmesh.ops.translate(bm,
+                                vec=(0, 0, -self.extrude_depth/2),
+                                verts=verts2)
         else:
-            # Extrude in one direction
-            extruded = bmesh.ops.extrude_face_region(bm, geom=[bm.faces[-1]])
-            bmesh.ops.translate(bm, 
-                               vec=(0, 0, self.extrude_depth), 
-                               verts=[v for v in extruded['geom'] if isinstance(v, bmesh.types.BMVert)])
-        
+            extrude = bmesh.ops.extrude_face_region(bm, geom=[face])
+            verts_extruded = [e for e in extrude['geom'] if isinstance(e, bmesh.types.BMVert)]
+            bmesh.ops.translate(bm,
+                                vec=(0, 0, self.extrude_depth),
+                                verts=verts_extruded)
+
+                
         # Update mesh
         bm.to_mesh(mesh)
         bm.free()

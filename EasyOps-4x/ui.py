@@ -13,20 +13,24 @@ class OBJECT_MT_easy_radial_menu(bpy.types.Menu):
             pie.operator("object.easy_bevel",             icon='MOD_BEVEL')
             pie.operator("object.easy_sharpen_edges",     icon='MOD_SHRINKWRAP')
             pie.operator("object.easy_smart_apply",       icon='CHECKMARK')
+            ff_op = pie.operator("object.easy_freeform_boolean", text="FreeForm", icon='GREASEPENCIL')
             pie.operator("object.easy_smart_uv_unwrap",   icon='UV')
             pie.operator("object.easy_clean_geometry",    icon='CLEAN_CHANNELS')
             pie.operator("object.easy_remove_doubles",    icon='X')
             pie.operator("object.assign_random_materials",icon='MATERIAL')
+            
+            ff_op.operation = 'DIFFERENCE'
 
         elif len(sel) >= 2:
             pie.operator("object.easy_boolean_difference",icon='MOD_BOOLEAN')
             pie.operator("object.easy_boolean_union",     icon='MOD_BOOLEAN')
             pie.operator("object.easy_boolean_intersect", icon='MOD_BOOLEAN')
             pie.operator("object.easy_smart_uv_unwrap",   icon='UV')
+            ff_op = pie.operator("object.easy_freeform_boolean", text="FreeForm Diff", icon='SELECT_SUBTRACT')
+            ff_op.operation = 'DIFFERENCE'
 
         else:
             pie.label(text="Select 1–2 meshes", icon='INFO')
-
 
 class EasyUtilsPanel(bpy.types.Panel):
     """Easy Utils Tools"""
@@ -75,6 +79,33 @@ class EasyOpsPanel(bpy.types.Panel):
         layout.operator("object.easy_boolean_difference")
         layout.operator("object.easy_boolean_union")
         layout.operator("object.easy_boolean_intersect")
+        
+        # Add FreeForm Boolean section
+        layout.separator()
+        layout.label(text="FreeForm Boolean")
+        box = layout.box()
+        col = box.column(align=True)
+        
+        # Create a row for the operation buttons
+        row = col.row(align=True)
+        
+        # FreeForm Difference
+        op = row.operator("object.easy_freeform_boolean", text="FF Diff", icon='SELECT_SUBTRACT')
+        op.operation = 'DIFFERENCE'
+        
+        # FreeForm Union  
+        op = row.operator("object.easy_freeform_boolean", text="FF Union", icon='SELECT_EXTEND')
+        op.operation = 'UNION'
+        
+        # FreeForm Intersect
+        op = row.operator("object.easy_freeform_boolean", text="FF Intersect", icon='SELECT_INTERSECT')
+        op.operation = 'INTERSECT'
+        
+        # Settings row
+        props_row = col.row(align=True)
+        props_row.label(text="Depth:")
+        # We can't directly access operator properties here, so we'll add scene properties
+        
         layout.separator()
         layout.label(text="Modifiers & Cleanup")
         layout.operator("object.easy_smart_decimate")

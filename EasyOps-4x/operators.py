@@ -1,7 +1,11 @@
 import bpy
-import random
-import math
-from bpy.props import EnumProperty
+import bmesh
+import gpu
+import bgl
+from gpu_extras.batch import batch_for_shader
+from mathutils import Vector, Matrix
+from bpy_extras import view3d_utils
+from bpy.props import EnumProperty, FloatProperty, BoolProperty
 
 from . import utils
 
@@ -311,3 +315,282 @@ class OBJECT_OT_easy_ssharpen(bpy.types.Operator):
                 utils.enable_auto_smooth(obj)
         self.report({'INFO'}, "SSharpen complete.")
         return {'FINISHED'}
+
+# Freeform drawing
+class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
+    """Draw freeform boolean shapes in the viewport"""
+    bl_idname = "object.easy_freeform_boolean"
+    bl_label = "FreeForm Boolean"
+    bl_options = {'REGISTER', 'UNDO', 'BLOCKING'}
+    
+    # Properties
+    operation: EnumProperty(
+        name="Boolean Operation",
+        description="Type of boolean operation to perform",
+        items=[
+            ('DIFFERENCE', "Difference", "Subtract the drawn shape"),
+            ('UNION', "Union", "Add the drawn shape"),
+            ('INTERSECT', "Intersect", "Keep only intersection"),
+        ],
+        default='DIFFERENCE'
+    )
+    
+    extrude_depth: FloatProperty(
+        name="Extrude Depth",
+        description="How deep to extrude the drawn shape",
+        default=1.0,
+        min=0.01,
+        max=10.0
+    )
+    
+    both_directions: BoolProperty(
+        name="Both Directions",
+        description="Extrude in both directions from the drawing plane",
+        default=True
+    )
+    
+    def __init__(self):
+        self.points = []
+        self.mouse_pos = Vector((0, 0))
+        self.drawing = False
+        self.draw_handler = None
+        self.target_objects = []
+        self.preview_mesh = None
+        
+    def invoke(self, context, event):
+        if context.area.type == 'VIEW_3D':
+            # Get target objects
+            self.target_objects = [obj for obj in context.selected_objects if obj.type == 'MESH']
+            if not self.target_objects:
+                self.report({'WARNING'}, "No mesh objects selected")
+                return {'CANCELLED'}
+            
+            # Set up drawing
+            self.points = []
+            self.drawing = True
+            
+            # Add viewport drawing handler
+            args = (self, context)
+            self.draw_handler = bpy.types.SpaceView3D.draw_handler_add(
+                self.draw_callback_px, args, 'WINDOW', 'POST_PIXEL'
+            )
+            
+            context.window_manager.modal_handler_add(self)
+            self.report({'INFO'}, f"FreeForm Boolean ({self.operation}) - Click to add points, Enter to finish, Esc to cancel")
+            return {'RUNNING_MODAL'}
+        else:
+            self.report({'WARNING'}, "View3D not found, cannot run operator")
+            return {'CANCELLED'}
+    
+    def modal(self, context, event):
+        context.area.tag_redraw()
+        
+        self.mouse_pos = Vector((event.mouse_region_x, event.mouse_region_y))
+        
+        if event.type == 'MOUSEMOVE':
+            return {'RUNNING_MODAL'}
+        
+        elif event.type == 'LEFTMOUSE' and event.value == 'PRESS':
+            # Add point to polygon
+            self.add_point(context, event)
+            return {'RUNNING_MODAL'}
+        
+        elif event.type == 'RET' and event.value == 'PRESS':
+            # Finish drawing and create boolean
+            if len(self.points) >= 3:
+                self.create_boolean_mesh(context)
+                self.cleanup(context)
+                return {'FINISHED'}
+            else:
+                self.report({'WARNING'}, "Need at least 3 points to create a shape")
+                return {'RUNNING_MODAL'}
+        
+        elif event.type in {'RIGHTMOUSE', 'ESC'}:
+            # Cancel operation
+            self.cleanup(context)
+            return {'CANCELLED'}
+        
+        elif event.type == 'Z' and event.value == 'PRESS':
+            # Undo last point
+            if self.points:
+                self.points.pop()
+            return {'RUNNING_MODAL'}
+        
+        return {'RUNNING_MODAL'}
+    
+    def add_point(self, context, event):
+        """Convert mouse position to 3D world coordinate"""
+        region = context.region
+        rv3d = context.region_data
+        
+        # Get mouse coordinate in region
+        coord = Vector((event.mouse_region_x, event.mouse_region_y))
+        
+        # Convert to 3D world coordinate on active object plane or XY plane
+        if context.active_object and context.active_object.type == 'MESH':
+            # Use active object's location as the drawing plane
+            depth_location = context.active_object.location
+        else:
+            depth_location = Vector((0, 0, 0))
+        
+        # Cast ray from mouse to get 3D coordinate
+        world_pos = view3d_utils.region_2d_to_location_3d(
+            region, rv3d, coord, depth_location
+        )
+        
+        self.points.append(world_pos)
+    
+    def create_boolean_mesh(self, context):
+        """Create the boolean mesh from drawn points"""
+        if len(self.points) < 3:
+            return
+        
+        # Create new mesh
+        mesh = bpy.data.meshes.new("FreeFormBoolean")
+        obj = bpy.data.objects.new("FreeFormBoolean", mesh)
+        
+        # Create bmesh
+        bm = bmesh.new()
+        
+        # Add vertices from points
+        verts = []
+        for point in self.points:
+            vert = bm.verts.new(point)
+            verts.append(vert)
+        
+        # Create face from vertices
+        bm.faces.new(verts)
+        
+        # Extrude the face
+        if self.both_directions:
+            # Extrude in both directions
+            extruded = bmesh.ops.extrude_face_region(bm, geom=[bm.faces[-1]])
+            bmesh.ops.translate(bm, 
+                               vec=(0, 0, self.extrude_depth/2), 
+                               verts=[v for v in extruded['geom'] if isinstance(v, bmesh.types.BMVert)])
+            
+            # Extrude in opposite direction
+            extruded = bmesh.ops.extrude_face_region(bm, geom=[bm.faces[0]])
+            bmesh.ops.translate(bm, 
+                               vec=(0, 0, -self.extrude_depth/2), 
+                               verts=[v for v in extruded['geom'] if isinstance(v, bmesh.types.BMVert)])
+        else:
+            # Extrude in one direction
+            extruded = bmesh.ops.extrude_face_region(bm, geom=[bm.faces[-1]])
+            bmesh.ops.translate(bm, 
+                               vec=(0, 0, self.extrude_depth), 
+                               verts=[v for v in extruded['geom'] if isinstance(v, bmesh.types.BMVert)])
+        
+        # Update mesh
+        bm.to_mesh(mesh)
+        bm.free()
+        
+        # Add to scene
+        context.collection.objects.link(obj)
+        
+        # Apply boolean to target objects
+        for target in self.target_objects:
+            if target.type == 'MESH':
+                mod = target.modifiers.new("FreeForm Boolean", 'BOOLEAN')
+                mod.operation = self.operation
+                mod.object = obj
+        
+        # Turn boolean object into wireframe and move to cuts collection
+        from . import utils
+        utils.turn_into_wireframe(obj)
+        
+        self.report({'INFO'}, f"FreeForm Boolean ({self.operation}) created with {len(self.points)} points")
+    
+    def draw_callback_px(self, op, context):
+        """Draw the polygon in the viewport"""
+        if not self.drawing:
+            return
+        
+        # Enable blending for transparency
+        bgl.glEnable(bgl.GL_BLEND)
+        bgl.glBlendFunc(bgl.GL_SRC_ALPHA, bgl.GL_ONE_MINUS_SRC_ALPHA)
+        
+        # Draw points
+        if self.points:
+            # Convert 3D points to 2D screen coordinates
+            region = context.region
+            rv3d = context.region_data
+            
+            screen_points = []
+            for point in self.points:
+                screen_coord = view3d_utils.location_3d_to_region_2d(region, rv3d, point)
+                if screen_coord:
+                    screen_points.append(screen_coord)
+            
+            if len(screen_points) >= 2:
+                # Draw lines connecting points
+                shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+                
+                # Create line batch
+                coords = []
+                for i in range(len(screen_points)):
+                    coords.append(screen_points[i])
+                    if i < len(screen_points) - 1:
+                        coords.append(screen_points[i + 1])
+                
+                # Add line from last point to mouse (preview)
+                if screen_points:
+                    coords.append(screen_points[-1])
+                    coords.append(self.mouse_pos)
+                
+                batch = batch_for_shader(shader, 'LINES', {"pos": coords})
+                
+                # Set color based on operation
+                if self.operation == 'DIFFERENCE':
+                    color = (1.0, 0.2, 0.2, 0.8)  # Red
+                elif self.operation == 'UNION':
+                    color = (0.2, 1.0, 0.2, 0.8)  # Green
+                else:  # INTERSECT
+                    color = (0.2, 0.2, 1.0, 0.8)  # Blue
+                
+                shader.bind()
+                shader.uniform_float("color", color)
+                batch.draw(shader)
+            
+            # Draw points as circles
+            for screen_point in screen_points:
+                self.draw_circle(screen_point, 4, (1.0, 1.0, 1.0, 1.0))
+        
+        # Restore OpenGL defaults
+        bgl.glDisable(bgl.GL_BLEND)
+    
+    def draw_circle(self, center, radius, color):
+        """Draw a simple circle at screen coordinates"""
+        import math
+        
+        shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+        
+        # Generate circle vertices
+        segments = 16
+        coords = []
+        for i in range(segments + 1):
+            angle = 2.0 * math.pi * i / segments
+            x = center[0] + radius * math.cos(angle)
+            y = center[1] + radius * math.sin(angle)
+            coords.append((x, y))
+        
+        batch = batch_for_shader(shader, 'LINE_STRIP', {"pos": coords})
+        shader.bind()
+        shader.uniform_float("color", color)
+        batch.draw(shader)
+    
+    def cleanup(self, context):
+        """Clean up the drawing handler"""
+        if self.draw_handler:
+            bpy.types.SpaceView3D.draw_handler_remove(self.draw_handler, 'WINDOW')
+            self.draw_handler = None
+        
+        self.drawing = False
+        context.area.tag_redraw()
+    
+    def draw(self, context):
+        """Draw the operator properties in the dialog"""
+        layout = self.layout
+        layout.prop(self, "operation")
+        layout.prop(self, "extrude_depth")
+        layout.prop(self, "both_directions")

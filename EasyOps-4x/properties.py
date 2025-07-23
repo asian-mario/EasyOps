@@ -47,3 +47,15 @@ class EasyUtilsProperties(bpy.types.PropertyGroup):
         min=0.0,
         max=1.0
     )
+    freeform_extrude_depth: FloatProperty(
+        name="FreeForm Extrude Depth",
+        description="Default depth for FreeForm boolean extrusion",
+        default=1.0,
+        min=0.01,
+        max=10.0
+    )
+    freeform_both_directions: BoolProperty(
+        name="FreeForm Both Directions",
+        description="Extrude FreeForm boolean in both directions",
+        default=True
+    )

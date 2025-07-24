@@ -350,6 +350,12 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         description="Extrude in both directions from the drawing plane",
         default=True
     )
+
+    camera_navigation: BoolProperty(
+        name="Camera Navigation Mode",
+        description="Toggle between drawing and camera navigation",
+        default=False
+    )
     
     def invoke(self, context, event):
         # Initialize instance variables
@@ -428,6 +434,16 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         context.area.tag_redraw()
         
         self.mouse_pos = Vector((event.mouse_region_x, event.mouse_region_y))
+        if event.type == 'C' and event.value == 'PRESS':
+            self.camera_navigation = not self.camera_navigation
+            self.update_wireframe_preview(context)
+
+            mode_text = "Camera Navigation" if self.camera_navigation else "Drawing"
+            self.report({'INFO'}, f"Switched to {mode_text} mode")
+            return {'RUNNING_MODAL'}
+
+        if self.camera_navigation:
+            return {'PASS_THROUGH'}
         
         if event.type == 'MOUSEMOVE':
             if self.adjusting_depth:
@@ -502,6 +518,8 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             # Toggle both directions
             self.both_directions = not self.both_directions
             self.update_preview(context)
+            self.update_wireframe_preview(context)
+
             direction_text = "both directions" if self.both_directions else "one direction"
             self.report({'INFO'}, f"Extrude mode: {direction_text}")
             return {'RUNNING_MODAL'}
@@ -514,6 +532,7 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             self.operation = operations[next_index]
             self.report({'INFO'}, f"Boolean operation: {self.operation}")
             return {'RUNNING_MODAL'}
+    
         
         return {'RUNNING_MODAL'}
     
@@ -880,6 +899,7 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             "RMB: Adjust depth",
             "Wheel: Change depth",
             "Tab: Change operation",
+            "C: Change Camera/Drawing Mode"
             "B: Toggle both directions",
             "Z: Undo point",
             "Enter: Finish",
@@ -936,6 +956,10 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             bpy.types.SpaceView3D.draw_handler_remove(self.draw_handler, 'WINDOW')
             self.draw_handler = None
         
+        if hasattr(self, 'wireframe_obj') and self.wireframe_obj:
+            bpy.data.objects.remove(self.wireframe_obj, do_unlike=True)
+            self.wireframe_obj = None
+
         self.drawing = False
         self.preview_batch = None
         self.preview_shader = None
@@ -947,3 +971,44 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         layout.prop(self, "operation")
         layout.prop(self, "extrude_depth")
         layout.prop(self, "both_directions")
+    
+    def update_wireframe_preview(self, context):
+        """Create or update a wireframe object showing the FF boolean"""
+        if hasattr(self, 'wireframe_obj') and self.wireframe_obj:
+            bpy.data.objects.remove(self.wireframe_obj, do_unlink=True)
+
+        if len(self.points) < 3:
+            return
+        
+        mesh = bpy.data.meshes.new("FF_PREVIEW_MESH")
+        obj = bpy.data.objects.new("FF_PREVIEW", mesh)
+        context.collection.objects.link(obj)
+
+        bm = bmesh.new()
+        bottom = []
+        top = []
+
+        for pt in self.points:
+            if self.both_directions:
+                bottom_pt = pt - self.drawing_plane_normal * (self.current_depth / 2)
+                top_pt = pt + self.drawing_plane_normal * (self.current_depth / 2)
+            else:
+                bottom_pt = pt
+                top_pt = pt + self.drawing_plane_normal * self.current_depth
+
+            bottom.append(bm.verts.new(bottom_pt))
+            top.append(bm.verts.new(top_pt))
+
+        bm.verts.ensure_lookup_table()
+
+        for i in range(len(bottom)):
+            next_i = (i + 1) % len(bottom)
+            bm.faces.new([bottom[i], bottom[next_i], top[next_i], top[i]])
+
+        bm.to_mesh(mesh)
+        bm.free()
+        
+        obj.display_type = 'WIRE'
+        obj.show_in_front = True
+        obj.hide_select = True
+        self.wireframe_obj = obj

@@ -738,6 +738,9 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
                 self.preview_shader.uniform_float("color", color)
                 self.preview_batch.draw(self.preview_shader)
             
+            # Temporarily disable depth testing for 2D overlays to ensure invsibility in Ortho views
+            gpu.state.depth_test_set('NONE')
+
             # Draw 2D overlay (points and lines)
             self.draw_2d_overlay(context)
             
@@ -747,7 +750,12 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             # Restore OpenGL defaults
             gpu.state.depth_test_set('NONE')
             gpu.state.blend_set('NONE')
-        
+    """
+        ditching the nice commenting for a second,
+        WHAT THE HELL AM I DOING WRONG, I FILL THE SHADER FOR THE BOOLEAN AND ITS NOT WORKING
+        + WHY DID SOME OF MY FUNCTIONS SUDDENLY DISAPPEARED WHEN I COMMIT THE CHANGES??
+        HELLO ?
+    """
     def draw_2d_overlay(self, context):
         """Draw 2D overlay elements"""
         if not self.points:
@@ -763,10 +771,35 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             if screen_coord:
                 screen_points.append(screen_coord)
         
-        if len(screen_points) >= 2:
-            # Draw lines connecting points
-            shader = gpu.shader.from_builtin('UNIFORM_COLOR')
-            
+        shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+        
+        # Set color based on operation
+        if self.operation == 'DIFFERENCE':
+            line_color = (1.0, 0.4, 0.4, 0.8)  # Red
+        elif self.operation == 'UNION':
+            line_color = (0.4, 1.0, 0.4, 0.8)  # Green
+        else:  # INTERSECT
+            line_color = (0.4, 0.4, 1.0, 0.8)  # Blue
+
+        if len(screen_points) >= 3:
+            try:
+                fill_coords = []
+                for i in range(1, len(screen_points) - 1):
+                    fill_coords.extend([
+                        screen_points[0],
+                        screen_points[i].
+                        screen_points[i + 1]
+                    ])
+
+                if fill_coords:
+                    fill_batch = batch_for_shader(shader, 'TRIANGLES', {"pos", fill_coords})
+                    shader.bind()
+                    shader.uniform_float("color", fill_color)
+                    fill_batch.draw(shader)
+            except Exception as e:
+                print(f"Error drawing fill: {e}")
+
+        if len(screen_points) >= 2:         
             # Create line batch
             coords = []
             for i in range(len(screen_points)):
@@ -784,25 +817,24 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             
             batch = batch_for_shader(shader, 'LINES', {"pos": coords})
             
-            # Set color based on operation
-            if self.operation == 'DIFFERENCE':
-                line_color = (1.0, 0.4, 0.4, 0.8)  # Red
-            elif self.operation == 'UNION':
-                line_color = (0.4, 1.0, 0.4, 0.8)  # Green
-            else:  # INTERSECT
-                line_color = (0.4, 0.4, 1.0, 0.8)  # Blue
-            
             shader.bind()
             shader.uniform_float("color", line_color)
             batch.draw(shader)
         
-        # Draw points as circles
-        for screen_point in screen_points:
-            self.draw_circle(screen_point, 4, (1.0, 1.0, 1.0, 1.0))
+        # Draw points as circles (always visible)
+        for i, screen_point in enumerate(screen_points):
+            if i == 0:
+                self.draw_circle(screen_point, 6, (1.0, 1.0, 0.0, 1.0))
+            else:
+                self.draw_circle(screen_point, 4, (1.0, 1.0, 1.0, 1.0))
         
+        # Draw larger circle when not adjusting depth, notifies user its no longer changing
+        if not self.adjusting_depth:
+            self.draw_circle(self.mouse_pos, 3, (0.8, 0.8, 0.8, 0.7))
+
         # Draw depth indicator
-        if len(self.points) >= 3:
-            self.draw_depth_indicator(context)
+        if len(self.points) >= 1:
+            self.draw_depth_indicator(context) # (inf.) HELLO? THIS IS ALREADY HERE WHY ARENT YOU BEING CALLED??
     
     def draw_depth_indicator(self, context):
         """Draw depth value on screen"""
@@ -850,11 +882,19 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             blf.position(font_id, 50, 110 + i * 15, 0)
             blf.draw(font_id, control)
     
+    # Confusing func. name, it's a vertex circle not an actual circle
     def draw_circle(self, center, radius, color):
         """Draw a simple circle at screen coordinates"""
-        import math
         
         shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+
+        coords_filled = [center]
+        segments = 16
+        for i in range(segments + 1):
+            angle = 2.0 * math.pi * i / segments
+            x = center[0] + radius * math.cos(angle)
+            y = center[1] + radius * math.sin(angle)
+            coords_filled.append((x, y))
         
         # Generate circle vertices
         segments = 16
@@ -865,8 +905,20 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             y = center[1] + radius * math.sin(angle)
             coords.append((x, y))
         
-        batch = batch_for_shader(shader, 'LINE_STRIP', {"pos": coords})
+        batch_filled = batch_for_shader(shader, 'TRI_FAN', {"pos": coords_filled})
         shader.bind()
+        fill_color = (color[0], color[1], color[2], color[3] * 0.6)
+        shader.uniform_float("color", fill_color)
+        batch_filled.draw(shader)
+
+        coords_filled = [center]
+        for i in range(segments + 1):
+            angle = 2.0 * math.pi * i / segments
+            x = center[0] + radius * math.cos(angle)
+            y = center[1] + radius * math.sin(angle)
+            coords_filled.append((x, y))
+
+        batch = batch_for_shader(shader, 'LINE_STRIP', {"pos": coords})
         shader.uniform_float("color", color)
         batch.draw(shader)
     

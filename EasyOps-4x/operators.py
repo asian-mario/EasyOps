@@ -406,9 +406,23 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             self.drawing_plane_center = Vector((0, 0, 0))
         
         # Use view direction as drawing plane normal
-        view_matrix = rv3d.view_matrix
-        self.drawing_plane_normal = Vector((view_matrix[0][2], view_matrix[1][2], view_matrix[2][2]))
+        view_matrix = rv3d.view_matrix.inverted()
+
+        self.drawing_plane_normal = -view_matrix.col[2].to_3d() # Easier fix
         self.drawing_plane_normal.normalize()
+
+        # Orthographic fix, not the best but it'll do | X / Y / Z
+        if rv3d.is_orthographic_side_view:
+            # Swap with more predictive normal
+            if abs(self.drawing_plane_normal.x) > 0.9:
+                self.drawing_plane_normal = Vector((1, 0, 0)) if self.drawing_plane_normal > 0 else Vector((-1, 0, 0))
+            elif abs(self.drawing_plane_normal.y) > 0.9:
+                self.drawing_plane_normal = Vector((0, 1, 0)) if self.drawing_plane_normal > 0 else Vector((0, -1, 0))
+            elif abs(self.drawing_plane_normal.z) > 0.9:
+                self.drawing_plane_normal = Vector((0, 0, 1)) if self.drawing_plane_normal > 0 else Vector((0, 0, -1))
+
+                
+
     
     def modal(self, context, event):
         context.area.tag_redraw()
@@ -520,18 +534,27 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
                                            self.drawing_plane_center, 
                                            self.drawing_plane_normal)
         
+        # Ray-plane intersection is currently failing on some axises, this should be the fix->
+        if world_pos is None:
+            # Use region_2d_to_location_3d as a fallback since it seems to be weird on some orthographic views
+            world_pos = view3d_utils.region_2d_to_location_3d(
+                region, rv3d, coord, self.drawing_plane_center
+            )
+
         if world_pos:
             self.points.append(world_pos)
     
     def intersect_ray_plane(self, ray_origin, ray_direction, plane_point, plane_normal):
         """Calculate intersection of ray with plane"""
+        ray_direction = ray_direction.normalized()
+        plane_normal = plane_normal.normalized()
+
         denom = plane_normal.dot(ray_direction)
-        if abs(denom) < 1e-6:
+
+        if abs(denom) < 1e-4: # Edit threshold for parallel checks
             return None  # Ray is parallel to plane
         
         t = (plane_point - ray_origin).dot(plane_normal) / denom
-        if t < 0:
-            return None  # Intersection is behind ray origin
         
         return ray_origin + t * ray_direction
     

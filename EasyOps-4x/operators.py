@@ -738,6 +738,19 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
                 self.preview_shader.uniform_float("color", color)
                 self.preview_batch.draw(self.preview_shader)
             
+            # Freeview for FF
+            if hasattr(self, 'wireframe_batch') and self.wireframe_batch and hsattr(self, 'wireframe_shader') and self.wireframe_shader:
+                if self.operation == 'DIFFERENCE':
+                    color = (1.0, 0.5, 0.5, 0.8)  # Red with transparency
+                elif self.operation == 'UNION':
+                    color = (0.5, 1.0, 0.5, 0.8)  # Green with transparency
+                else:  # INTERSECT
+                    color = (0.5, 0.5, 1.0, 0.8)  # Blue with transparency
+                
+                self.wireframe_shader.bind()
+                self.wireframe_shader.uniform_float("color", wire_color)
+                self.wireframe_batch.draw(self.wireframe_shader)
+            
             # Temporarily disable depth testing for 2D overlays to ensure invsibility in Ortho views
             gpu.state.depth_test_set('NONE')
 
@@ -750,12 +763,7 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             # Restore OpenGL defaults
             gpu.state.depth_test_set('NONE')
             gpu.state.blend_set('NONE')
-    """
-        ditching the nice commenting for a second,
-        WHAT THE HELL AM I DOING WRONG, I FILL THE SHADER FOR THE BOOLEAN AND ITS NOT WORKING
-        + WHY DID SOME OF MY FUNCTIONS SUDDENLY DISAPPEARED WHEN I COMMIT THE CHANGES??
-        HELLO ?
-    """
+
     def draw_2d_overlay(self, context):
         """Draw 2D overlay elements"""
         if not self.points:

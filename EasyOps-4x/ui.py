@@ -16,7 +16,7 @@ class OBJECT_MT_easy_radial_menu(bpy.types.Menu):
             ff_op = pie.operator("object.easy_freeform_boolean", text="FreeForm", icon='GREASEPENCIL')
             pie.operator("object.easy_smart_uv_unwrap",   icon='UV') 
             # These currently do not load. I will check the iconpacks.
-            pie.operator("object.easy_clean_geometry",    icon='CLEAN_CHANNELS')
+            pie.operator("object.easy_clean_geometry",    icon='BRUSH_DATA')
             pie.operator("object.easy_remove_doubles",    icon='X')
             pie.operator("object.assign_random_materials",icon='MATERIAL')
             

@@ -467,6 +467,8 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
                 self.adjusting_depth = True
                 self.initial_mouse_y = event.mouse_region_y
                 self.initial_depth = self.current_depth
+                self.update_wireframe_preview(context)
+
                 self.report({'INFO'}, "Adjusting depth - move mouse up/down, LMB to confirm")
             return {'RUNNING_MODAL'}
         
@@ -475,6 +477,8 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
                 # End depth adjustment mode
                 self.adjusting_depth = False
                 self.extrude_depth = self.current_depth
+                self.update_wireframe_preview(context)
+
                 self.report({'INFO'}, f"Depth set to {self.current_depth:.3f}")
             return {'RUNNING_MODAL'}
         

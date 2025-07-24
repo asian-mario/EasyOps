@@ -396,32 +396,66 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             self.report({'WARNING'}, "View3D not found, cannot run operator")
             return {'CANCELLED'}
     
+    # Rewrote this whole section -> Stops FF object from spawning inside the object
     def setup_drawing_plane(self, context):
         """Set up the drawing plane based on the current view"""
         rv3d = context.region_data
-        
-        if context.active_object and context.active_object.type == 'MESH':
-            self.drawing_plane_center = context.active_object.location.copy()
-        else:
-            self.drawing_plane_center = Vector((0, 0, 0))
-        
-        # Use view direction as drawing plane normal
+    
+        # Get matrix and camera position
         view_matrix = rv3d.view_matrix.inverted()
+        camera_location = view_matrix.translation
 
-        self.drawing_plane_normal = -view_matrix.col[2].to_3d() # Easier fix
+        # Use view direction as the drawing plane normal
+        self.drawing_plane_normal = -view_matrix.col[2].to_3d()
         self.drawing_plane_normal.normalize()
 
-        # Orthographic fix, not the best but it'll do | X / Y / Z
-        if rv3d.is_orthographic_side_view:
-            # Swap with more predictive normal
-            if abs(self.drawing_plane_normal.x) > 0.9:
-                self.drawing_plane_normal = Vector((1, 0, 0)) if self.drawing_plane_normal > 0 else Vector((-1, 0, 0))
-            elif abs(self.drawing_plane_normal.y) > 0.9:
-                self.drawing_plane_normal = Vector((0, 1, 0)) if self.drawing_plane_normal > 0 else Vector((0, -1, 0))
-            elif abs(self.drawing_plane_normal.z) > 0.9:
-                self.drawing_plane_normal = Vector((0, 0, 1)) if self.drawing_plane_normal > 0 else Vector((0, 0, -1))
+        closest_distance = float('inf')
 
-                
+        if self.target_objects:
+            for obj in self.target_objects:
+                # Get bounding box
+                bbox_corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+
+                # Find closest corner to camera along view direction
+                for corner in bbox_corners:
+                    camera_to_corner = corner - camera_location
+                    distance_along_view = camera_to_corner.dot(-self.drawing_plane_normal)
+                    if distance_along_view > 0 and distance_along_view < closest_distance:
+                        closest_distance = distance_along_view
+        
+        # Handle scenario where no objects
+        if closest_distance == float('inf'):
+            scene_center = Vector((0, 0, 0))
+            camera_to_center = scene_center - camera_location
+            closest_distance = max(1.0, camera_to_center.dot(-self.drawing_plane_normal))
+
+        # Position drawing plane in front of closest object
+        #offset_distance = min(closest_distance * 0.9, closest_distance -0.2)
+        offset_distance = closest_distance - 0.5
+        offset_distance = max(0.5, offset_distance)
+
+        # Ortho views need handling
+        if rv3d.is_orthographic_side_view:
+            offset_distance = max(1.0, closest_distance - 0.2)
+
+            if abs(self.drawing_plane_normal.x) > 0.9:
+                self.drawing_plane_normal = Vector((1, 0, 0)) if self.drawing_plane_normal.x > 0 else Vector((-1, 0, 0))
+            elif abs(self.drawing_plane_normal.y) > 0.9:
+                self.drawing_plane_normal = Vector((0, 1, 0)) if self.drawing_plane_normal.y > 0 else Vector((0, -1, 0))
+            elif abs(self.drawing_plane_normal.z) > 0.9:
+                self.drawing_plane_normal = Vector((0, 0, 1)) if self.drawing_plane_normal.z > 0 else Vector((0, 0, -1))
+
+        # Set drawing plane closer to camera
+        self.drawing_plane_center = camera_location - self.drawing_plane_normal * offset_distance
+
+        # Debug printing 
+        print(f"Camera location: {camera_location}")
+        print(f"Drawing plane center: {self.drawing_plane_center}")
+        print(f"Drawing plane normal: {self.drawing_plane_normal}")
+        print(f"Offset distamce: {offset_distance}")
+        print(f"Closest object distance: {closest_distance}")
+
+
 
     
     def modal(self, context, event):
@@ -541,7 +575,23 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
                 region, rv3d, coord, self.drawing_plane_center
             )
 
+            # Failsafe after failsafe (this is stupid.)
+            if world_pos is None:
+                print("All intersection methods failed, creating point in front of camera")
+
+                camera_pos = ray_origin
+                plane_to_camera = self.drawing_plane_center - camera_pos
+                distance_to_plane = plane_to_camera.dot(self.drawing_plane_normal)
+
+                world_pos = ray_origin + view_vector * abs(distance_to_plane / view_vector.dot(self.drawing_plane_normal))
+
         if world_pos:
+            print(f"Adding point: {world_pos}")
+
+            point_to_plane = world_pos - self.drawing_plane_center
+            distance_from_plane = abs(point_to_plane.dot(self.drawing_plane_normal))
+            if distance_from_plane > 0.1:
+                print(f"Warning: Point is {distance_from_plane} units from drawing plane")
             self.points.append(world_pos)
     
     def intersect_ray_plane(self, ray_origin, ray_direction, plane_point, plane_normal):
@@ -555,6 +605,10 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             return None  # Ray is parallel to plane
         
         t = (plane_point - ray_origin).dot(plane_normal) / denom
+
+        if t < 0:
+            print(f"Intersection behind camera: t = {t}")
+            return None
         
         return ray_origin + t * ray_direction
     

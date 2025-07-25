@@ -1,25 +1,23 @@
 
-# EasyUtils & EasyOps for Blender 2.93/4.xx
+# EasyUtils & EasyOps for Blender 4.xx/4.5
 
-**EasyUtils & EasyOps** is a Blender add-on that provides a set of tools designed to make common mesh operations easier and faster. This includes auto-renaming, UV unwrapping, smart apply operations, booleans with automatic wireframe mode, geometry cleaning, and more. All boolean effectors are automatically moved to a dedicated collection called `EASYOPS_CUTS`. For any extra information please refer [here](https://asian-mario.github.io/easyops-doc/)
+**EasyUtils & EasyOps** is a Blender add-on that provides a set of tools designed to make common mesh operations easier, faster and optimized for a hardsurface modelling workflow. For any extra information please refer [here](https://asian-mario.github.io/easyops-doc/).
 
 ## Features
-- **Auto Rename**: Automatically renames selected or all mesh objects and their mesh data with a custom prefix.
-- **Smart UV Unwrap**: Quickly performs a smart UV unwrap with customizable island margins.
-- **Shade Smooth & Auto Smooth**: Applies smooth shading to selected or all objects with an option to enable auto smooth and set a custom smooth angle.
-- **Bevel Modifier**: Quickly adds a bevel modifier to selected objects.
-- **Smart Decimate**: Adds a decimate modifier to reduce polygon count.
-- **Boolean Operations**: Perform boolean operations (Difference, Union, Intersect) with active objects automatically converted to wireframe and moved to a custom collection (`EASYOPS_CUTS`).
-- **Flat Shading**: Apply flat shading to selected or all objects.
-- **Clean Geometry**: Cleans up geometry by removing doubles, deleting loose elements, and dissolving degenerate geometry.
-- **Smart Apply**: Applies only the boolean modifiers on objects while preserving other modifiers.
+- **QuickMenu**: Access the most common EasyUtils and EasyOps operations with `LSHIFT + Z`, which adapts to the number of objects selected
+- **FreeForm Booleans**: Draw out your own booleans with the FreeForm EasyOps tool and adjust them to your own needs without the need of any extra modelling (WIP)
+- **EasyOps Booleans**: See how your Booleans effect your objects clearly, use the `Smart Apply` feature to avoid pondering on what modifiers to apply first.
+- **Random Materials**: Getting confused on what object is what? Assign a random material!
+- [Much more!](https://asian-mario.github.io/easyops-doc/)
 
 ## Installation
-1. Download the `easy_utils_easyops.py` script.
-2. Open Blender and go to **Edit > Preferences > Add-ons**.
-3. Click **Install** in the top right and navigate to the downloaded `.py` file.
-4. Select the file and click **Install Add-on**.
-5. Once installed, enable the add-on by checking the box next to its name.
+1. Go to the `Releases` tab and find a `Stable-4x` version for the smoothest experience.
+2. Download the `.zip` file of your choosing
+    i. EasyOps-Proton is for later versions of Blender (4.1-4.5+)
+    ii. EasyOps-Neutron is for earlier versions of Blender (<4.1 / **DOES NOT SUPPORT** < 3.xx)
+3. Open Blender and head to Edit > Preferences > Install Add-on
+4. Select your `.zip` file
+5. Happy modelling!
 
 ## Usage
 The add-on creates a new tab in the **3D Viewport** called **Easy Utils**. Please refer [here](https://asian-mario.github.io/easyops-doc/) for documentation.

@@ -11,7 +11,7 @@
 - [Much more!](https://asian-mario.github.io/easyops-doc/)
 
 ## Installation
-1. Go to the `Releases` tab and find a `Stable-4x` version for the smoothest experience.
+1. Go to the `Releases` tab and find a recent release version for the smoothest experience
 2. Download the `.zip` file of your choosing
     i. EasyOps-Proton is for later versions of Blender (4.1-4.5+)
     ii. EasyOps-Neutron is for earlier versions of Blender (<4.1 / **DOES NOT SUPPORT** < 3.xx)

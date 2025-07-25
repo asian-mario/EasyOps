@@ -396,6 +396,8 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         self.preview_batch = None
         self.preview_shader = None
 
+        self.shift_held = False
+
         self.grid_size = self.get_grid_size(context)
         self.axis_lock_modes = ['NONE', 'X', 'Y']
         self.current_axis_index = 0
@@ -568,6 +570,7 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         context.area.tag_redraw()
         
         self.mouse_pos = Vector((event.mouse_region_x, event.mouse_region_y))
+        self.shift_held = event.shift
 
         snap_enabled = self.grid_snap and not event.shift
         
@@ -1019,7 +1022,14 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         
         # Draw larger circle when not adjusting depth, notifies user its no longer changing
         if not self.adjusting_depth:
-            self.draw_circle(self.mouse_pos, 3, (0.8, 0.8, 0.8, 0.7))
+            if self.axis_lock != 'NONE':
+                circle_color = (1.0, 1.0, 0.0, 0.8)
+            elif not self.shift_held:
+                circle_color = (0.0, 1.0, 0.0, 0.8)
+            else:
+                circle_color = (1.0, 0.0, 0.0, 0.8)
+            
+            self.draw_circle(self.mouse_pos, 3, circle_color)
 
         # Draw depth indicator
         if len(self.points) >= 1:

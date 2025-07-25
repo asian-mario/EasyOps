@@ -889,7 +889,6 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
                 mod = target.modifiers.new("FreeForm Boolean", 'BOOLEAN')
                 mod.operation = self.operation
                 mod.object = obj
-                mod.solver = 'FAST'
 
         
         # Turn boolean object into wireframe and move to cuts collection

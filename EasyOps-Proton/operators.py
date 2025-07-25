@@ -397,7 +397,7 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         self.preview_shader = None
 
         self.grid_size = self.get_grid_size(context)
-        self.axis_lock_modes = ['NONE', 'X', 'Y', 'Z']
+        self.axis_lock_modes = ['NONE', 'X', 'Y']
         self.current_axis_index = 0
         
         if context.area.type == 'VIEW_3D':
@@ -434,21 +434,81 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             return space.overlay.grid_scale
         return 1.0
     
+    # Wrong Impl. keeping it because its useful
     def snap_to_grid(self, point, grid_size):
         """Snap point to grid"""
+        if not self.points:
+            return point
+
         return Vector((
             round(point.x / grid_size) * grid_size,
             round(point.y / grid_size) * grid_size,
             round(point.z / grid_size) * grid_size
         ))
     
+    def snap_to_angle(self, point, context, snap_angle=15.0):
+        """Snap point to angular increments"""
+        if not self.points:
+            return point
+
+        reference_point = self.points[-1]
+
+        direction = point - reference_point
+
+        if direction.length < 0.01:
+            return point
+
+        plane_up = Vector((0, 0, 1))
+        if abs(self.drawing_plane_normal.dot(plane_up)) > 0.9:
+            plane_up = Vector((1, 0, 0))
+        
+        plane_right = self.drawing_plane_normal.cross(plane_up).normalized()
+        plane_up = plane_right.cross(self.drawing_plane_normal).normalized()
+
+        # Project direction onto the 2D plane
+        x_component = direction.dot(plane_right)
+        y_component = direction.dot(plane_up)
+
+        # Angle in degrees
+        angle_rad = math.atan2(y_component, x_component)
+        angle_deg = math.degrees(angle_rad)
+
+        snapped_angle_deg = round(angle_deg / snap_angle) * snap_angle
+        snapped_angle_rad = math.radians(snapped_angle_deg)
+
+        distance = direction.length
+        snapped_direction = (plane_right * math.cos(snapped_angle_rad) +
+            plane_up * math.sin(snapped_angle_rad)) * distance
+
+        return reference_point + snapped_direction
+
+    def snap_to_increments(self, point, context, increment=0.01):
+        """Snap to distance increments from reference point"""
+        if not self.points:
+            return point
+
+        reference_point = self.points[-1]
+        direction = point - reference_point
+
+        if direction.length < 0.01:
+            return point
+
+        # Snap the distance to increments
+        distance = direction.length
+        snapped_distance = round(distance / increment) * increment
+
+        normalized_direction = direction.normalized()
+        return reference_point + normalized_direction * snapped_distance
+
     def apply_axis_lock(self, world_pos, context):
         """Apply axis lock constraint to current world position"""
         if self.axis_lock == 'NONE' or not self.points:
             return world_pos
 
-        # First point is ALWAYS used as a reference for axis locks
-        reference_point = self.points[0]
+        reference_point = self.points[-1]
+
+        """ 
+        World Axis Lock
 
         if self.axis_lock == 'X':
             return Vector((world_pos.x, reference_point.y, reference_point.z))
@@ -456,6 +516,26 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             return Vector((reference_point.x, world_pos.y, reference_point.z))
         elif self.axis_lock == 'Z':
             return Vector((reference_point.x, reference_point.y, world_pos.z))
+        """
+        
+        plane_normal = self.drawing_plane_normal.normalized()
+
+        world_up = Vector((0, 0, 1))
+        if abs(plane_normal.dot(world_up)) > 0.9:
+            world_up = Vector((1, 0, 0)) # Nearly parallel to world up -> switch to world
+        
+        local_x = plane_normal.cross(world_up).normalized()
+        local_y = local_x.cross(plane_normal).normalized()
+        local_z = plane_normal
+
+        offset_vector = world_pos - reference_point
+
+        if self.axis_lock == 'X':
+            local_x_component = offset_vector.dot(local_x)
+            return reference_point + local_x * local_x_component
+        elif self.axis_lock == 'Y':
+            local_y_component = offset_vector.dot(local_y)
+            return reference_point + local_y * local_y_component
 
         return world_pos
 
@@ -463,10 +543,8 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         """Set up the drawing plane based on the current view"""
         rv3d = context.region_data
         
-        if context.active_object and context.active_object.type == 'MESH':
-            self.drawing_plane_center = context.active_object.location.copy()
-        else:
-            self.drawing_plane_center = Vector((0, 0, 0))
+
+        self.drawing_plane_center = Vector((0, 0, 0))
         
         # Use view direction as drawing plane normal
         view_matrix = rv3d.view_matrix.inverted()
@@ -558,6 +636,7 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             self.current_depth = min(10.0, self.current_depth + 0.1)
             self.extrude_depth = self.current_depth
             self.update_preview(context)
+            self.update_wireframe_preview(context)
             return {'RUNNING_MODAL'}
         
         elif event.type == 'WHEELDOWNMOUSE':
@@ -565,6 +644,7 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             self.current_depth = max(0.01, self.current_depth - 0.1)
             self.extrude_depth = self.current_depth
             self.update_preview(context)
+            self.update_wireframe_preview(context)
             return {'RUNNING_MODAL'}
         
         elif event.type == 'RET' and event.value == 'PRESS':
@@ -639,9 +719,11 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             world_pos = self.apply_axis_lock(world_pos, context)
 
             if snap_enabled:
-                world_pos = self.snap_to_grid(world_pos, self.grid_size)
+                world_pos = self.snap_to_angle(world_pos, context, snap_angle=15.0)
+                world_pos = self.snap_to_increments(world_pos, context, increment=0.1)
 
-            self.points.append(world_pos)
+        
+        self.points.append(world_pos)
     
     def intersect_ray_plane(self, ray_origin, ray_direction, plane_point, plane_normal):
         """Calculate intersection of ray with plane"""
@@ -894,12 +976,12 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
                 for i in range(1, len(screen_points) - 1):
                     fill_coords.extend([
                         screen_points[0],
-                        screen_points[i].
+                        screen_points[i],
                         screen_points[i + 1]
                     ])
 
                 if fill_coords:
-                    fill_batch = batch_for_shader(shader, 'TRIANGLES', {"pos", fill_coords})
+                    fill_batch = batch_for_shader(shader, 'TRIANGLES', {"pos": fill_coords})
                     shader.bind()
                     shader.uniform_float("color", fill_color)
                     fill_batch.draw(shader)
@@ -969,13 +1051,6 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         blf.color(font_id, *color)
         blf.draw(font_id, f"Operation: {self.operation}")
 
-        # Draw grid snap status
-        blf.position(font_id, 50, 110, 0)
-        snap_color = (0.4, 1.0, 0.4, 1.0) if self.grid_snap else (1.0, 0.4, 0.4, 1.0)
-        blf.color(font_id, *snap_color)
-        snap_text = f"Grid Snap: {'ON' if self.grid_snap else 'OFF'} (Grid: {self.grid_size:.2f})"
-        blf.draw(font_id, snap_text)
-
         # Draw axis lock status
         blf.position(font_id, 50, 140, 0)
         if self.axis_lock == 'NONE':
@@ -988,7 +1063,7 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         blf.draw(font_id, lock_text)
         
         # Draw controls help
-        blf.position(font_id, 50, 110, 0)
+        blf.position(font_id, 50, 170, 0)
         blf.color(font_id, 0.8, 0.8, 0.8, 1)
         blf.size(font_id, 12)
         
@@ -1001,13 +1076,13 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             "X: Cycle axis lock",
             "B: Toggle both directions",
             "Z: Undo point",
-            "Shift: (Hold) Turn of snap-to-grid"
+            "Shift: (Hold) Turn off snap-to-grid",
             "Enter: Finish",
             "Esc: Cancel"
         ]
         
         for i, control in enumerate(controls):
-            blf.position(font_id, 50, 110 + i * 15, 0)
+            blf.position(font_id, 50, 170 + i * 15, 0)
             blf.draw(font_id, control)
     
     # Confusing func. name, it's a vertex circle not an actual circle

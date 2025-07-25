@@ -318,7 +318,7 @@ class OBJECT_OT_easy_ssharpen(bpy.types.Operator):
             if obj.type == 'MESH':
                 utils.detect_sharp_edges(obj)
                 utils.apply_bevel_modifier(obj)
-                utils.enable_auto_smooth(obj)
+                bpy.ops.object.shade_smooth()
         self.report({'INFO'}, "SSharpen complete.")
         return {'FINISHED'}
 
@@ -359,8 +359,26 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         name="Camera Navigation Mode",
         description="Toggle between drawing and camera navigation",
         default=False
+    )    
+
+    grid_snap: BoolProperty(
+        name="Grid Snap",
+        description="Snap points to grid",
+        default=True
     )
-    
+
+    axis_lock: EnumProperty(
+        name="Axis Lock",
+        description="Lock drawing to specific axis",
+        items=[
+            ('NONE', "None", "No axis lock"),
+            ('X', "X-Axis", "Lock to X Axis"),
+            ('Y', "Y-Axis", "Lock to Y Axis"),
+            ('Z', "Z-Axis", "Lock to Z axis"),
+        ],
+        default='NONE'
+    )
+
     def invoke(self, context, event):
         # Initialize instance variables
         self.points = []
@@ -377,6 +395,10 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         self.drawing_plane_center = Vector((0, 0, 0))
         self.preview_batch = None
         self.preview_shader = None
+
+        self.grid_size = self.get_grid_size(context)
+        self.axis_lock_modes = ['NONE', 'X', 'Y', 'Z']
+        self.current_axis_index = 0
         
         if context.area.type == 'VIEW_3D':
             # Get target objects
@@ -406,6 +428,37 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             self.report({'WARNING'}, "View3D not found, cannot run operator")
             return {'CANCELLED'}
     
+    def get_grid_size(self, context):
+        space = context.space_data
+        if hasattr(space, 'overlay') and hasattr(space.overlay, 'grid_scale'):
+            return space.overlay.grid_scale
+        return 1.0
+    
+    def snap_to_grid(self, point, grid_size):
+        """Snap point to grid"""
+        return Vector((
+            round(point.x / grid_size) * grid_size,
+            round(point.y / grid_size) * grid_size,
+            round(point.z / grid_size) * grid_size
+        ))
+    
+    def apply_axis_lock(self, world_pos, context):
+        """Apply axis lock constraint to current world position"""
+        if self.axis_lock == 'NONE' or not self.points:
+            return world_pos
+
+        # First point is ALWAYS used as a reference for axis locks
+        reference_point = self.points[0]
+
+        if self.axis_lock == 'X':
+            return Vector((world_pos.x, reference_point.y, reference_point.z))
+        elif self.axis_lock == 'Y':
+            return Vector((reference_point.x, world_pos.y, reference_point.z))
+        elif self.axis_lock == 'Z':
+            return Vector((reference_point.x, reference_point.y, world_pos.z))
+
+        return world_pos
+
     def setup_drawing_plane(self, context):
         """Set up the drawing plane based on the current view"""
         rv3d = context.region_data
@@ -431,13 +484,15 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             elif abs(self.drawing_plane_normal.z) > 0.9:
                 self.drawing_plane_normal = Vector((0, 0, 1)) if self.drawing_plane_normal > 0 else Vector((0, 0, -1))
 
-                
-
+            
     
     def modal(self, context, event):
         context.area.tag_redraw()
         
         self.mouse_pos = Vector((event.mouse_region_x, event.mouse_region_y))
+
+        snap_enabled = self.grid_snap and not event.shift
+        
         if event.type == 'C' and event.value == 'PRESS':
             self.camera_navigation = not self.camera_navigation
             self.update_wireframe_preview(context)
@@ -445,6 +500,18 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             mode_text = "Camera Navigation" if self.camera_navigation else "Drawing"
             self.report({'INFO'}, f"Switched to {mode_text} mode")
             return {'RUNNING_MODAL'}
+        
+        if event.type == 'X' and event.value == 'PRESS':
+            self.current_axis_index = (self.current_axis_index + 1) % len(self.axis_lock_modes)
+            self.axis_lock = self.axis_lock_modes[self.current_axis_index]
+
+            if self.axis_lock == 'NONE':
+                lock_text = "No axis lock"
+            else:
+                lock_text = f"Locked to {self.axis_lock}-axis"
+
+            self.report({'INFO'}, f"Axis lock: {lock_text}")
+            return {'RUNNING_MODAL'} 
 
         if self.camera_navigation:
             return {'PASS_THROUGH'}
@@ -461,7 +528,7 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         elif event.type == 'LEFTMOUSE' and event.value == 'PRESS':
             if not self.adjusting_depth:
                 # Add point to polygon
-                self.add_point(context, event)
+                self.add_point(context, event, snap_enabled)
                 self.update_preview(context)
             return {'RUNNING_MODAL'}
         
@@ -544,7 +611,7 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         
         return {'RUNNING_MODAL'}
     
-    def add_point(self, context, event):
+    def add_point(self, context, event, snap_enabled=True):
         """Convert mouse position to 3D world coordinate on the drawing plane"""
         region = context.region
         rv3d = context.region_data
@@ -569,6 +636,11 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             )
 
         if world_pos:
+            world_pos = self.apply_axis_lock(world_pos, context)
+
+            if snap_enabled:
+                world_pos = self.snap_to_grid(world_pos, self.grid_size)
+
             self.points.append(world_pos)
     
     def intersect_ray_plane(self, ray_origin, ray_direction, plane_point, plane_normal):
@@ -896,6 +968,24 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         color = op_color.get(self.operation, (1, 1, 1, 1))
         blf.color(font_id, *color)
         blf.draw(font_id, f"Operation: {self.operation}")
+
+        # Draw grid snap status
+        blf.position(font_id, 50, 110, 0)
+        snap_color = (0.4, 1.0, 0.4, 1.0) if self.grid_snap else (1.0, 0.4, 0.4, 1.0)
+        blf.color(font_id, *snap_color)
+        snap_text = f"Grid Snap: {'ON' if self.grid_snap else 'OFF'} (Grid: {self.grid_size:.2f})"
+        blf.draw(font_id, snap_text)
+
+        # Draw axis lock status
+        blf.position(font_id, 50, 140, 0)
+        if self.axis_lock == 'NONE':
+            lock_color = (0.8, 0.8, 0.8, 1.0)
+            lock_text = "Axis Lock: None"
+        else:
+            lock_color = (1.0, 1.0, 0.4, 1.0)
+            lock_text = f"Axis Lock: {self.axis_lock}-axis"
+        blf.color(font_id, *lock_color)
+        blf.draw(font_id, lock_text)
         
         # Draw controls help
         blf.position(font_id, 50, 110, 0)
@@ -907,9 +997,11 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             "RMB: Adjust depth",
             "Wheel: Change depth",
             "Tab: Change operation",
-            "C: Change Camera/Drawing Mode"
+            "C: Change Camera/Drawing Mode",
+            "X: Cycle axis lock",
             "B: Toggle both directions",
             "Z: Undo point",
+            "Shift: (Hold) Turn of snap-to-grid"
             "Enter: Finish",
             "Esc: Cancel"
         ]

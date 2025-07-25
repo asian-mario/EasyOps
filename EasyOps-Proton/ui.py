@@ -11,7 +11,7 @@ class OBJECT_MT_easy_radial_menu(bpy.types.Menu):
 
         if len(sel) == 1:
             pie.operator("object.easy_bevel",             icon='MOD_BEVEL')
-            pie.operator("object.easy_sharpen_edges",     icon='MOD_SHRINKWRAP')
+            pie.operator("object.easy_ssharpen",     icon='MOD_SHRINKWRAP')
             pie.operator("object.easy_smart_apply",       icon='CHECKMARK')
             ff_op = pie.operator("object.easy_freeform_boolean", text="FreeForm", icon='GREASEPENCIL')
             pie.operator("object.easy_smart_uv_unwrap",   icon='UV') 

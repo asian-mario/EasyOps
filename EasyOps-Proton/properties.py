@@ -21,6 +21,14 @@ class EasyUtilsProperties(bpy.types.PropertyGroup):
         min=0.0,
         max=1.0
     )
+    sharpen_angle: FloatProperty(
+        name="Sharpen Angle",
+        description="Angle threshold for edge shaprening",
+        default=30.0,
+        min=1.0,
+        max=180.0,
+        subtype='ANGLE'
+    )
     """
     Deprecated:
     

@@ -484,7 +484,7 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
 
         return reference_point + snapped_direction
 
-    def snap_to_increments(self, point, context, increment=0.01):
+    def snap_to_increments(self, point, context, increment=0.05):
         """Snap to distance increments from reference point"""
         if not self.points:
             return point
@@ -723,7 +723,7 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
 
             if snap_enabled:
                 world_pos = self.snap_to_angle(world_pos, context, snap_angle=15.0)
-                world_pos = self.snap_to_increments(world_pos, context, increment=0.1)
+                world_pos = self.snap_to_increments(world_pos, context, increment=0.05)
 
         
         self.points.append(world_pos)

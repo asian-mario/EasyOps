@@ -35,39 +35,95 @@ class OBJECT_MT_easy_radial_menu(bpy.types.Menu):
 
 class EasyUtilsPanel(bpy.types.Panel):
     """Easy Utils Tools"""
-    bl_label = "Easy Utils"
+    bl_label = "EasyUtils"
     bl_idname = "OBJECT_PT_easy_utils"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = "Easy Utils"
 
+    def draw_header(self, context):
+        layout = self.layout
+        layout.label(text="", icon='TOOL_SETTINGS')
+    
     def draw(self, context):
         layout = self.layout
         props = context.scene.easy_utils_props
 
-        layout.prop(props, "rename_prefix")
-        layout.operator("object.easy_auto_rename")
-        layout.separator()
-        layout.operator("object.easy_ssharpen", text="SSharpen")
-        layout.label(text="Random Materials:")
-        layout.operator("object.assign_random_materials")
-        layout.prop(props, "metallic_color_min")
-        layout.prop(props, "metallic_color_max")
+        main_col = layout.column(align=True)
 
-        layout.separator()
-        layout.prop(props, "island_margin")
-        layout.operator("object.easy_smart_uv_unwrap")
+        # Naming
+        box = main_col.box()
+        header = box.row(align=True)
+        header.label(text="Auto Naming", icon="OUTLINER_DATA_FONT")
+
+        col = box.column(align=True)
+        col.scale_y = 0.9
+
+        row = col.row(align=True)
+        row.prop(props, "rename_prefix", text="")
+        row.operator("object.easy_auto_rename", text ="", icon='FILE_REFRESH')
+
+        # Shading
+        main_col.seperator(factor=0.5)
+        box = main_col.box()
+        header = box.row(align=True)
+        header.label(text="Surface Control", icon='SHADING_RENDERED')
         
+        col = box.column(align=True)
+        col.scale_y = 1.1
+
+        # Shading Controls
+        row = col.row(align=True)
+        row.operator("object.easy_ssharpen", text="SSharpen", icon='MOD_SMOOTH')
+        row.operator("object.easy_shade_smooth", text="Smooth", icon='SURFACE_NSURFACE')
+
+        # Materials
+        main_col.seperator(factor=0.5)
+        vox = main_col.box()
+        header = box.row(align=True)
+        header.label(text="Materials", icon='MATERIAL')
+
+        col = box.column(align=True)
+        col.scale_y = 1.0
+
+        col.operator("Object.assign_random_materials", text="Random Materials", icon='MATERIAL')
+
+        # Material Settings
+        sub_box = col.box()
+        sub_col = sub_box.column(align=True)
+        sub_col.scale_y = 0.8
+        sub_col.prop(props, "metallic_color_min", text="Min")
+        sub_col.prop(props, "metallic_color_max", text="Max")
+
+        # UV Mapping
+        main_col.seperator(factor=0.5)
+        box = main_col.box()
+        header = box.row(align=True)
+        header.label(text="UV Mapping", icon='UV')
+
         """
-        Deprecated
-        layout.prop(props, "enable_auto_smooth")
-        layout.prop(props, "auto_smooth_angle")
+            song rec. of the commit: fake plastic trees
         """
+
+        col = box.column(align=True)
+        col.scale_y = 1.0
+
+        # UV controls
+        row = col.row(align=True)
+        row.prop(props, "island_margin", text="Margin")
+
+        col.operator("object.easy_smart_uv_unwrap", text="Smart UV Unwrap", icon='UV')
+
+        # Cleanup
+        main_col.seperator(factor=0.5)
+        box = main_col.box()
+        header = box.row(align=True)
+        header.label(text="Cleanup", icon='BRUSH_DATA')
+
+        col = box.column(align=True)
+        col.scale_y = 1.1
+        col.operator("object.easy_remove_doubles", text="Remove Doubles", icon='X')
         
-        layout.operator("object.easy_shade_smooth")
-        layout.operator("object.easy_remove_doubles")
-
-
 class EasyOpsPanel(bpy.types.Panel):
     """EasyOps Boolean & Cleanup"""
     bl_label = "EasyOps"

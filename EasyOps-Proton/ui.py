@@ -168,7 +168,7 @@ class EasyOpsPanel(bpy.types.Panel):
         row.operator("object.easy_boolean_intersect", text="Int", icon='SELECT_INTERSECT')
 
         # Freeform Booleans
-        main_col.seperator(factor=0.3)
+        main_col.separator(factor=0.3)
         ff_box = main_col.box()
         ff_header = ff_box.row(align=True)
         ff_header.label(text="FreeForm Boolean", icon='GREASEPENCIL')
@@ -189,7 +189,7 @@ class EasyOpsPanel(bpy.types.Panel):
         op.operation = 'INTERSECT'
 
         # Modelling Tools
-        main_col.seperator(factor=0.5)
+        main_col.separator(factor=0.5)
         box = main_col.box()
         header = box.row(align=True)
         header.label(text="Modelling Tools", icon='EDITMODE_HLT')
@@ -207,7 +207,7 @@ class EasyOpsPanel(bpy.types.Panel):
 
         # Active Modifiers
         if obj and obj.type == 'MESH' and obj.modifiers:
-            main_col.seperator(factor=0.5)
+            main_col.separator(factor=0.5)
             mod_box = main_col.box()
             mod_header = mod_box.row(align=True)
             mod_header.label(text="Active Modifiers", icon='MODIFIER')

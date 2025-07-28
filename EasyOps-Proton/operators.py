@@ -1196,3 +1196,174 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         obj.show_in_front = True
         obj.hide_select = True
         self.wireframe_obj = obj
+
+# Next plan is to integrate these 'drawing templates' such as Squares or Circles, hopefully we can inherity the FF Boolean class and just use some of their helper functions
+class OBJET_OT_east_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
+    """Draw rectangles/squares with a drag to re-size controls"""
+    bl_idname = "object.easy_rectangle_boolean"
+    bl_label = "Rectangle Boolean"
+    bl_options = {'REGISTER', 'UNDO,' 'BLOCKING'}
+
+    # Class specific
+    maintain_aspect: BoolPropert(
+        name="Square Mode",
+        description="Maintain 1:1 aspect ratio",
+        default=False
+    )
+
+    def invoke(self, context, event):
+        self.start_point = None
+        self.current_point = None
+        self.is_dragging = False
+        self.rectangle_defined = False
+
+        result = super().invoke(context, event)
+
+        if result == {'RUNNING_MODAL'}:
+            self.report({'INFO'}, f"Rectnagle Boolean ({self.operation}) - LMB + Drag: Define Rectangle, RMB: Adjust Depth, Enter: Finish, Esc: Cancel")
+
+        return result
+
+    def modal(selfm context, event):
+        context.area.tag_redraw()
+
+        # Handle rectangle-specific input
+        if not self.rectangle_defined:
+            return self.handle_rectangle_input(context, event)
+            else:
+                return super().modal(context, event)
+                # Parent modal for depth adjustment works just fine above
+    
+    def handle_rectangle_input(self, context, event):
+        """Input for JUST the definition phase"""
+        self.mouse_pos = Vector((event.mouse_region_x, event.mouse_region_y))
+        self.shift_held = event.shift
+
+        # Handle camera navigation
+        if event.type == 'C' and event.value == 'PRESS':
+            self.camera_navigation = not self.camera_navigation
+            mode_text = "Camera Navigation" if self.camera_navigation else "Drawing Mode"
+            self.report({'INFO'}, f"Switched to {mode_text} mode")
+            return {'RUNNING_MODAL'}
+
+        if self.camera_navigation:
+            return {'PASS_THROUGH'}
+
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
+            if not self.is_dragging:
+                # Start rectangle definition -> Doesn't overlap with depth definition
+                self.start_rectangle(context, event)
+                return {'RUNNING_MODAL'}
+
+        elif event.type == 'MOUSEMOVE':
+            if self.is_dragging:
+                self.update_rectangle(context, event)
+                return {'RUNNING_MODAL'}
+
+        elif event.type == 'LEFTMOUSE' and event.value == 'RELEASE':
+            if self.is_dragging:
+                self.finish_rectangle(context, event)
+                return {'RUNNING_MODAL'}
+        
+        elif event.type == 'S' and event.value == 'PRESS':
+            # Toggle 1:1 (Square) definition mode
+            self.maintain_aspect = not.maintain_aspect
+            mode_text = "Square" if self.maintain_aspect else "Rectangle"
+            self.report({'INFO'}, f"Mode: {mode_text}")
+            if self.is_dragging:
+                self.update_rectangle(context, event)
+            return {'RUNNING_MODAL'}
+        
+        elif event.type == 'TAB' and event.value == 'PRESS':
+            # Cycle boolean operations
+            operations = ['DIFFERENCE', 'UNION', 'INTERSECT']
+            current_index = operations.index(self.operations)
+            next_index = (current_index + 1) % len(operations)
+            self.operation = operations[next_index]
+            self.report({'INFO'}, f"Boolean operation: {self.operation}")
+            return {'RUNNING_MODAL'}
+        
+        elif event.type in {'ESC'}:
+            # Cancel operation
+            self.cleanup(context)
+            return {'CANCELLED'}
+            
+        return {'RUNNING_MODAL'}
+
+    def start_rectangle(self, context, event):
+        """Start rectangle definition by defining the first corner"""
+        self.start_point = self.mouse_to_world_point(context, event)
+        self.current_point = self.start_point.copy()
+        self.is_dragging = True
+
+        self.points = []
+
+    def updae_rectangle(self, context, event):
+        """Update dimensions while dragging"""
+        if not self.start_point:
+            return
+
+        self.current_point = self.mouse_to_world_point(context, event)
+        self.generate_rectangle_points()
+
+        # Update preview
+        self.update_preview(context)
+    
+    def finish_rectangle(self, context, event):
+        """Switch to depth adjustment"""
+        if not self.start_point or not self.current_point:
+            return
+        
+        self.is_dragging = False
+        self.rectangle_defined = True
+
+        self.generate_rectangle_points()
+        # Generate final rectangle points
+
+        self.report({'INFO'}, f"Rectangle defined. RMB: Adjust Depth, Wheel: Change Depth, Enter: Finish")
+    
+    def generate_rectangle_points(self):
+        """Generate corner point plots of rectangles"""
+        if not self.start_point or not self.current_point:
+            return
+        
+        start = self.start_point
+        current = self.current_point
+
+        # Calculation dimensions
+        width = curremt.x - start.x
+        height = current.y - start.y
+
+        # Apply square mode if enabled
+        if self.maintain_aspect:
+            # Use larger dimension
+            size = max(abs(width)), abs(height))
+            width = size if width >= 0 else -size
+            height = size if height >= 0 else -size
+
+        # Generate four corners
+        corner1 = start
+        corner2 = Vector((start.x + width, start.y, start.z))
+        corner3 = Vector((start.x + width, start.y + height, start.z))
+        corner4 = Vector((start.x, start.y + height, start.z))
+
+        self.points = [corner1, corner2, corner3, corner4]
+
+    def mouse_to_world_point(self, context, event):
+        region = context.region
+        rv3d = context. region_data
+        
+        coord = Vector((event.mouse_region_x, event.mouse_region_y))
+        view_vector = view3d_utils.region_2d_to_vector_3d(region, rv3d, coord)
+        ray_origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, coord)
+        
+        world_pos = self.intersect_ray_plane(ray_origin, view_vector, 
+                                           self.drawing_plane_center, 
+                                           self.drawing_plane_normal)
+        
+        if world_pos is None:
+            world_pos = view3d_utils.region_2d_to_location_3d(
+                region, rv3d, coord, self.drawing_plane_center
+            )
+        
+        return world_pos

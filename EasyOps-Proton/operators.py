@@ -1599,6 +1599,19 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
                 blf.draw(font_id, control)
 
     def mouse_to_world_point(self, context, event):
+        if utils.is_surface_drawing_enabled(context):
+            surface_point, surface_normal = self.get_surface_point_and_normal(context, event)
+
+            if surface_point and surface_normal:
+                # Update drawing plane for surface drawing
+                self.setup_surface_drawing_plane(context, surface_point, surface_normal)
+                return surface_point
+            else:
+                return self.get_plane_intersection_point(context, event)
+        else:
+            return self.get_plane_intersection_point(context, event)
+
+    def get_plane_intersection_point(self, context, event):
         region = context.region
         rv3d = context.region_data
         

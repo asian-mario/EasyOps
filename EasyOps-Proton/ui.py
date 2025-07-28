@@ -188,6 +188,15 @@ class EasyOpsPanel(bpy.types.Panel):
         op = ff_row.operator("object.easy_freeform_boolean", text="FF∩", icon='SELECT_INTERSECT')
         op.operation = 'INTERSECT'
 
+        # Template Booleans
+        tb_col = ff_box.column(align=True)
+        tb_col.scale_y = 1.0
+
+        tb_row = tb_col.row(align_True)
+        op = tb_row.operator("object.easy_rectangle_boolean", text="◰-", icon='SELECT_SUBTRACT')
+        op.opeation = 'DIFFERENCE'
+    
+
         # Modelling Tools
         main_col.separator(factor=0.5)
         box = main_col.box()

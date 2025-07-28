@@ -35,6 +35,7 @@ classes = [
     operators.OBJECT_OT_easy_sharpen_edges,
     operators.OBJECT_OT_easy_ssharpen,
     operators.OBJECT_OT_easy_freeform_boolean,
+    operators.OBJECT_OT_easy_rectangle_boolean,
     ui.OBJECT_MT_easy_radial_menu,
     ui.EasyUtilsPanel,
     ui.EasyOpsPanel,

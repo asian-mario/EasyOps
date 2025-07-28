@@ -1198,7 +1198,7 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         self.wireframe_obj = obj
 
 # Next plan is to integrate these 'drawing templates' such as Squares or Circles, hopefully we can inherity the FF Boolean class and just use some of their helper functions
-class OBJET_OT_east_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
+class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
     """Draw rectangles/squares with a drag to re-size controls"""
     bl_idname = "object.easy_rectangle_boolean"
     bl_label = "Rectangle Boolean"
@@ -1298,7 +1298,7 @@ class OBJET_OT_east_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
 
         self.points = []
 
-    def updae_rectangle(self, context, event):
+    def update_rectangle(self, context, event):
         """Update dimensions while dragging"""
         if not self.start_point:
             return

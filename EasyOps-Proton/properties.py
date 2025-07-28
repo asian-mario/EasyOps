@@ -71,3 +71,8 @@ class EasyUtilsProperties(bpy.types.PropertyGroup):
         description="Extrude FreeForm boolean in both directions",
         default=True
     )
+    surface_drawing_mode: BoolProperty(
+        name="Surface Drawing",
+        description="Draw booleans on object surface using normals",
+        default=False
+    )

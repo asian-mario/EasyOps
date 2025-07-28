@@ -139,7 +139,7 @@ class EasyOpsPanel(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         obj = context.object
-
+        props = context.scene.easy_utils_props
         # Main Container
         main_col = layout.column(align=True)
 
@@ -173,6 +173,15 @@ class EasyOpsPanel(bpy.types.Panel):
         ff_header = ff_box.row(align=True)
         ff_header.label(text="FreeForm Boolean", icon='GREASEPENCIL')
 
+        # Surface drawing toggle
+        ff_col = ff_box.column(align=True)
+        ff_col.scale_y = 0.8
+
+        surface_row = ff_col.row(align=True)
+        surface_row.prop(props, "surface_drawing_mode", text="Surface Drawing", icon='SURFACE_NSPHERE')
+
+        ff_col.separator(factor=0.3)
+
         ff_col = ff_box.column(align=True)
         ff_col.scale_y = 1.0
 
@@ -187,6 +196,8 @@ class EasyOpsPanel(bpy.types.Panel):
 
         op = ff_row.operator("object.easy_freeform_boolean", text="FF∩", icon='SELECT_INTERSECT')
         op.operation = 'INTERSECT'
+
+        ff_col.separator(factor=0.3)
 
         # Template Booleans
         tb_col = ff_box.column(align=True)

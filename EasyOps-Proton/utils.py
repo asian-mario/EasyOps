@@ -59,3 +59,6 @@ def enable_auto_smooth(obj, angle=30):
     """Enable auto smooth on object with specified angle"""
     obj.data.use_auto_smooth = True
     obj.data.auto_smooth_angle = math.radians(angle)
+
+def is_surface_drawing_enabled(context):
+    return hasattr(context.scene, 'easy_utils_props') and context.scene.easy_utils_props.surface_drawing_mode

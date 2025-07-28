@@ -14,6 +14,8 @@ from . import utils
 
 """
     TODO: Consider splitting operators.py, getting too large
+
+    Oh my god, please consider a refactor.
 """
 
 class OBJECT_OT_easy_random_materials(bpy.types.Operator):
@@ -703,8 +705,89 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         
         return {'RUNNING_MODAL'}
     
+    # Surface drawing
+    def get_surface_point_and_normal(self, context, event):
+        """Get surface point and the normal from mouse position with raycasting"""
+        if not self.target_objects:
+            return None, None
+
+        region = context.region
+        rv3d = context.region_data
+
+        coord = Vector((event.mouse_region_x, event.mouse_region_y))
+
+        view_vector = view3d_utils.region_2d_to_vector_3d(region, rv3d, coord)
+        ray_origin = view3d_utils.region_2d_to_vector_3d(region, rv3d, coord)
+
+        # Try a raycast on each target object
+        for obj in self.target_objects:
+            if obj.type != 'MESH':
+                continue
+
+            # Convert the ray into object's local space
+            obj_matrix_inv = obj.matrix_world.inverted()
+            local_ray_origin = obj_matrix_inv @ ray_origin
+            local_ray_directio = (obj_matrix_inv @ (ray_origin + view_vector))
+            local_ray_direction.normalize()
+
+            # Perform raycast
+            depsgraph = context.evaluated_depsgraph_get()
+            obj_eval = obj.evaluated_get(depsgraph)
+
+            bm = bmesh.new()
+            bm.from_mesh(obj_eval.data)
+            bm.transform(obj.matrix_world)
+
+            bvh = bmesh.geometry.BVHTree.FromBMesh(bm)
+
+            hit_point, hit_normal, hit_index, hit_distance = bvh.ray_cast(ray_origin, view_vector)
+
+            bm.free()
+
+            if hit_point:
+                return hit_point, hit_normal
+        
+        return None, None
+    
+    # Same same but different
+    def setup_surface_drawing_plane(self, context, surface_point, surface_normal):
+        self.drawing_plane_center = surface_point
+        self.drawing_plane_normal = surface_normal.normalized()
+
+        # Ensure normal points can be seen by the camera (This does not mean depth extends towards the camera)
+        rv3d = context.region_data
+        view_matrix = rv3d.view_matrix.inverted()
+        camera_direction = -view_matrix.col[2].to_3d().normalized()
+
+        if self.drawing_plane_normal.dot(camera_direction) < 0:
+            self.drawing_plane_normal = -self.drawing_plane_normal
+    
+
     def add_point(self, context, event, snap_enabled=True):
-        """Convert mouse position to 3D world coordinate on the drawing plane"""
+        if self.is_surface_drawing_enabled(context):
+            surface_point, surface_normal = self.get_surface_point_and_normal(context, event)
+            
+            if surface_point and surface_normal:
+                self.setup_surface_drawing_plane(context, event)
+                world_pos = surface_point
+            else:
+                world_pos = self.get_plane_intersection_point(context, event)
+        
+        else:
+            # Regular plane drawing
+            world_pos = self.get_plane_intersection_point(context, event)
+        
+        if world_pos:
+            world_pos = self.apply_axis_lock(world_pos, context)
+
+            if snap_enabled:
+                world_pos = self.snap_to_angle(world_pos, context, snap_angle=15.0)
+                world_pos = self.snap_to_increments(world_pos, context, increment=0.05)
+        
+        self.points.append(world_pos)
+    
+
+    def get_plane_intersection_point(self, context, event):
         region = context.region
         rv3d = context.region_data
         
@@ -726,16 +809,8 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             world_pos = view3d_utils.region_2d_to_location_3d(
                 region, rv3d, coord, self.drawing_plane_center
             )
-
-        if world_pos:
-            world_pos = self.apply_axis_lock(world_pos, context)
-
-            if snap_enabled:
-                world_pos = self.snap_to_angle(world_pos, context, snap_angle=15.0)
-                world_pos = self.snap_to_increments(world_pos, context, increment=0.05)
-
+        return world_pos
         
-        self.points.append(world_pos)
     
     def intersect_ray_plane(self, ray_origin, ray_direction, plane_point, plane_normal):
         """Calculate intersection of ray with plane"""

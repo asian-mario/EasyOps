@@ -195,6 +195,10 @@ class EasyOpsPanel(bpy.types.Panel):
         tb_row = tb_col.row(align=True)
         op = tb_row.operator("object.easy_rectangle_boolean", text="◰-", icon='SELECT_SUBTRACT')
         op.operation = 'DIFFERENCE'
+        op = tb_row.operator("object.easy_rectangle_boolean", text="◰+", icon='SELECT_EXTEND')
+        op.operation = 'UNION'
+        op = tb_row.operator("object.easy_rectangle_boolean", text="◰∩", icon='SELECT_INTERSECT')
+        op.operation = 'INTERSECT'
     
 
         # Modelling Tools

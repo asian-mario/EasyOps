@@ -12,6 +12,9 @@ from bpy.props import EnumProperty, FloatProperty, BoolProperty
 
 from . import utils
 
+"""
+    TODO: Consider splitting operators.py, getting too large
+"""
 
 class OBJECT_OT_easy_random_materials(bpy.types.Operator):
     """Assign Random Materials to Selected Objects"""
@@ -1248,6 +1251,8 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
         if event.type == 'C' and event.value == 'PRESS':
             self.camera_navigation = not self.camera_navigation
             mode_text = "Camera Navigation" if self.camera_navigation else "Drawing Mode"
+            self.update_preview(context)
+            self.update_wireframe_preview(context)
             self.report({'INFO'}, f"Switched to {mode_text} mode")
             return {'RUNNING_MODAL'}
 
@@ -1258,6 +1263,7 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
             if not self.is_dragging:
                 # Start rectangle definition -> Doesn't overlap with depth definition
                 self.start_rectangle(context, event)
+                self.update_preview(context)
                 return {'RUNNING_MODAL'}
 
         elif event.type == 'MOUSEMOVE':
@@ -1308,12 +1314,17 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
         if not self.start_point:
             return
 
+        self.update_preview(context)
+        self.update_wireframe_preview(context)
+
         raw_point = self.mouse_to_world_point(context, event)
         self.current_point = self.add_grid_snapping(raw_point, context)
         self.generate_rectangle_points()
 
         # Update preview
         self.update_preview(context)
+        self.update_wireframe_preview(context)
+
     
     def finish_rectangle(self, context, event):
         """Switch to depth adjustment"""
@@ -1325,6 +1336,10 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
 
         self.generate_rectangle_points()
         # Generate final rectangle points
+
+        self.update_preview(context)
+        self.update_wireframe_preview(context)
+
 
         self.report({'INFO'}, f"Rectangle defined. RMB: Adjust Depth, Wheel: Change Depth, Enter: Finish")
     
@@ -1369,7 +1384,7 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
     def draw_2d_overlay(self, context):
         if not self.points and not self.is_dragging:
             return
-
+        self.draw_depth_indicator(context)
         region = context.region
         rv3d = context.region_data
 
@@ -1405,9 +1420,9 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
                     shader.uniform_float("color", fill_color)
                     fill_batch.draw(shader)
 
-                    except Exception as e:
-                        print(f"Error drawing rectangle fill: {e}")
-                
+                except Exception as e:
+                    print(f"Error drawing rectangle fill: {e}")
+            
                 line_coords = [
                     screen_points[0], screen_points[1],
                     screen_points[1], screen_points[2],
@@ -1447,9 +1462,6 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
             song of the commit: i wait for you
         """
 
-        # Draw depth indicator and controls
-        if self.rectangle_defined or len(self.points) >= 4:
-            self.draw_depth_indicator(context)
 
     def draw_depth_indicator(self, context):
         """Depth value and controls"""
@@ -1550,7 +1562,7 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
 
             if abs_normal.x == max_component:
                 self.drawing_plane_normal = Vector((1, 0, 0)) if self.drawing_plane_normal.x > 0 else Vector((-1, 0, 0))
-             elif abs_normal.y == max_component:
+            elif abs_normal.y == max_component:
                 self.drawing_plane_normal = Vector((0, 1, 0)) if self.drawing_plane_normal.y > 0 else Vector((0, -1, 0))
             else:
                 self.drawing_plane_normal = Vector((0, 0, 1)) if self.drawing_plane_normal.z > 0 else Vector((0, 0, -1))

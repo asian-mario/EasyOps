@@ -2,6 +2,7 @@ import bpy
 import bmesh
 import gpu
 import bgl
+import blf
 import random
 import math
 from gpu_extras.batch import batch_for_shader
@@ -554,15 +555,20 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         self.drawing_plane_normal = -view_matrix.col[2].to_3d() # Easier fix
         self.drawing_plane_normal.normalize()
 
-        # Orthographic fix, not the best but it'll do | X / Y / Z
+        # Orthographic fix
         if rv3d.is_orthographic_side_view:
-            # Swap with more predictive normal
-            if abs(self.drawing_plane_normal.x) > 0.9:
-                self.drawing_plane_normal = Vector((1, 0, 0)) if self.drawing_plane_normal > 0 else Vector((-1, 0, 0))
-            elif abs(self.drawing_plane_normal.y) > 0.9:
-                self.drawing_plane_normal = Vector((0, 1, 0)) if self.drawing_plane_normal > 0 else Vector((0, -1, 0))
-            elif abs(self.drawing_plane_normal.z) > 0.9:
-                self.drawing_plane_normal = Vector((0, 0, 1)) if self.drawing_plane_normal > 0 else Vector((0, 0, -1))
+            abs_normal = Vector((abs(self.drawing_plane_normal.x), 
+                            abs(self.drawing_plane_normal.y), 
+                            abs(self.drawing_plane_normal.z)))
+            
+            max_component = max(abs_normal)
+            
+            if abs_normal.x == max_component:
+                self.drawing_plane_normal = Vector((1, 0, 0)) if self.drawing_plane_normal.x > 0 else Vector((-1, 0, 0))
+            elif abs_normal.y == max_component:
+                self.drawing_plane_normal = Vector((0, 1, 0)) if self.drawing_plane_normal.y > 0 else Vector((0, -1, 0))
+            else:
+                self.drawing_plane_normal = Vector((0, 0, 1)) if self.drawing_plane_normal.z > 0 else Vector((0, 0, -1))
 
             
     
@@ -892,7 +898,6 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
 
         
         # Turn boolean object into wireframe and move to cuts collection
-        from . import utils
         utils.turn_into_wireframe(obj)
         
         self.report({'INFO'}, f"FreeForm Boolean ({self.operation}) created with {len(self.points)} points, depth: {self.current_depth:.3f}")
@@ -1036,8 +1041,7 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
     
     def draw_depth_indicator(self, context):
         """Draw depth value on screen"""
-        import blf
-        
+
         font_id = 0
         blf.position(font_id, 50, 50, 0)
         blf.size(font_id, 20)
@@ -1202,10 +1206,10 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
     """Draw rectangles/squares with a drag to re-size controls"""
     bl_idname = "object.easy_rectangle_boolean"
     bl_label = "Rectangle Boolean"
-    bl_options = {'REGISTER', 'UNDO,' 'BLOCKING'}
+    bl_options = {'REGISTER', 'UNDO', 'BLOCKING'}
 
     # Class specific
-    maintain_aspect: BoolPropert(
+    maintain_aspect: BoolProperty(
         name="Square Mode",
         description="Maintain 1:1 aspect ratio",
         default=False
@@ -1224,15 +1228,16 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
 
         return result
 
-    def modal(selfm context, event):
+    def modal(self, context, event):
         context.area.tag_redraw()
 
         # Handle rectangle-specific input
         if not self.rectangle_defined:
             return self.handle_rectangle_input(context, event)
-            else:
-                return super().modal(context, event)
-                # Parent modal for depth adjustment works just fine above
+        else:
+            return super().modal(context, event)
+            # Parent modal for depth adjustment works just fine above
+    
     
     def handle_rectangle_input(self, context, event):
         """Input for JUST the definition phase"""
@@ -1267,7 +1272,7 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
         
         elif event.type == 'S' and event.value == 'PRESS':
             # Toggle 1:1 (Square) definition mode
-            self.maintain_aspect = not.maintain_aspect
+            self.maintain_aspect = not maintain_aspect
             mode_text = "Square" if self.maintain_aspect else "Rectangle"
             self.report({'INFO'}, f"Mode: {mode_text}")
             if self.is_dragging:
@@ -1303,7 +1308,8 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
         if not self.start_point:
             return
 
-        self.current_point = self.mouse_to_world_point(context, event)
+        raw_point = self.mouse_to_world_point(context, event)
+        self.current_point = self.add_grid_snapping(raw_point, context)
         self.generate_rectangle_points()
 
         # Update preview
@@ -1330,28 +1336,183 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
         start = self.start_point
         current = self.current_point
 
-        # Calculation dimensions
-        width = curremt.x - start.x
-        height = current.y - start.y
+        # Calculate in world space then project the points
+        plane_normal = self.drawing_plane_normal.normalized()
 
-        # Apply square mode if enabled
+        # Create local co-ord system on the drawing plane
+        world_up = Vector((0, 0 , 1))
+        if abs(plane_normal.dot(world_up)) > 0.9:
+            world_up = Vector((1, 0, 0))
+    
+        local_x = plane_normal.cross(world_up).normalized()
+        local_y = local_x.cross(plane_normal).normalized()
+
+        # Get dimensions in local plane
+        offset = current - start
+        width = offset.dot(local_x)
+        height = offset.dot(local_y)
+
+        # Square mode application
         if self.maintain_aspect:
-            # Use larger dimension
-            size = max(abs(width)), abs(height))
+            size = max(abs(width), abs(height))
             width = size if width >= 0 else -size
             height = size if height >= 0 else -size
-
-        # Generate four corners
+        
         corner1 = start
-        corner2 = Vector((start.x + width, start.y, start.z))
-        corner3 = Vector((start.x + width, start.y + height, start.z))
-        corner4 = Vector((start.x, start.y + height, start.z))
+        corner2 = start + local_x * width
+        corner3 = start + local_x * width + local_y * height
+        corner4 = start + local_y * height
 
         self.points = [corner1, corner2, corner3, corner4]
+    
+    # Override
+    def draw_2d_overlay(self, context):
+        if not self.points and not self.is_dragging:
+            return
+
+        region = context.region
+        rv3d = context.region_data
+
+        if self.operation == 'DIFFERENCE':
+            line_color = (1.0, 0.4, 0.4, 0.8)  # Red
+            fill_color = (1.0, 0.4, 0.4, 0.2)  # Red with transparency
+        elif self.operation == 'UNION':
+            line_color = (0.4, 1.0, 0.4, 0.8)  # Green
+            fill_color = (0.4, 1.0, 0.4, 0.2)  # Green with transparency
+        else:  # INTERSECT
+            line_color = (0.4, 0.4, 1.0, 0.8)  # Blue
+            fill_color = (0.4, 0.4, 1.0, 0.2)  # Blue with transparency
+
+        shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+
+        # Draw rectangle outline and fill (if possible)
+        if len(self.points) >= 4:
+            screen_points = []
+            for point in self.points:
+                screen_coord = view3d_utils.location_3d_to_region_2d(region, rv3d, point)
+                if screen_coord:
+                    screen_points.append(screen_coord)
+
+            if len(screen_points) == 4:
+                try:
+                    fill_coords = [
+                        screen_points[0], screen_points[1], screen_points[2],
+                        screen_points[0], screen_points[2], screen_points[3]
+                    ]
+
+                    fill_batch = batch_for_shader(shader, 'TRIANGLES', {"pos": fill_coords})
+                    shader.bind()
+                    shader.uniform_float("color", fill_color)
+                    fill_batch.draw(shader)
+
+                    except Exception as e:
+                        print(f"Error drawing rectangle fill: {e}")
+                
+                line_coords = [
+                    screen_points[0], screen_points[1],
+                    screen_points[1], screen_points[2],
+                    screen_points[2], screen_points[3],
+                    screen_points[3], screen_points[0]
+                ]
+
+                line_batch = batch_for_shader(shader, 'LINES', {"pos": line_coords})
+                shader.bind()
+                shader.uniform_float("color", line_color)
+                line_batch.draw()
+
+                # Draw corner points
+                for i, screen_point in enumerate(screen_points):
+                    if i == 0:
+                        self.draw_circle(screen_point, 6, (1.0, 1.0, 0.0, 1.0))
+                    else:
+                        self.draw_circle(screen_point, 4, (1.0, 1.0, 1.0, 1.0))
+
+        elif self.is_dragging and self.start_point:
+            start_screen = view3d_utils.location_3d_to_region_2d(region, rv3d, self.start_point)
+            if start_screen:
+                coords = [start_screen, self.mouse_pos]
+                batch = batch_for_shader(shader, 'LINES', {"pos": coords})
+                shader.bind()
+                shader.uniform_float("color", line_color)
+                batch.draw(shader)
+
+                self.draw_circle(start_screen, 6, (1.0, 1.0, 0.0, 1.0))
+        
+        # Cursor indicator
+        if not self.rectangle_defined:
+            cursor_color = (0.0, 1.0, 0.0, 0.8) if not self.maintain_aspect else (1.0, 1.0, 0.0, 0.8)
+            self.draw_circle(self.mouse_pos, 3, cursor_color)
+        
+        """
+            song of the commit: i wait for you
+        """
+
+        # Draw depth indicator and controls
+        if self.rectangle_defined or len(self.points) >= 4:
+            self.draw_depth_indicator(context)
+
+    def draw_depth_indicator(self, context):
+        """Depth value and controls"""
+
+        font_id = 0
+        blf.size(font_id, 20)
+
+        # Draw depth info
+        blf.position(font_id, 50, 50, 0)
+        blf.color(font_id, 1, 1, 1, 1)
+        depth_text = f"Depth: {self.current_depth:.3f}"
+        if self.adjusting_depth:
+            depth_text += " (adjusting)"
+        blf.draw(font_id, depth_text)
+        
+        # Draw operation indicator
+        blf.position(font_id, 50, 80, 0)
+        op_color = {
+            'DIFFERENCE': (1.0, 0.4, 0.4, 1.0),
+            'UNION': (0.4, 1.0, 0.4, 1.0),
+            'INTERSECT': (0.4, 0.4, 1.0, 1.0)
+        }
+        color = op_color.get(self.operation, (1, 1, 1, 1))
+        blf.color(font_id, *color)
+        blf.draw(font_id, f"Operation: {self.operation}")
+
+        # Draw mode indicator
+        blf.position(font_id, 50, 110, 0)
+        mode_color = (1.0, 1.0, 0.4, 1.0) if self.maintain_aspect else (0.8, 0.8, 0.8, 1.0)
+        blf.color(font_id, *mode_color)
+        mode_text = "Square" if self.maintain_aspect else "Rectangle"
+        blf.draw(font_id, f"Mode: {mode_text}")
+
+        # Draw controls
+        blf.position(font_id, 50, 140, 0)
+        blf.color(font_id, 0.8, 0.8, 0.8, 1)
+        blf.size(font_id, 12)
+
+        if not self.rectangle_defined:
+            controls = [
+                "LMB+Drag: Define rectangle",
+                "S: Toggle Square/Rectangle mode",
+                "Tab: Change operation",
+                "C: Camera/Drawing mode",
+                "Esc: Cancel"
+            ]
+        else:
+            controls = [
+                "RMB: Adjust depth",
+                "Wheel: Change depth",
+                "Tab: Change operation",
+                "B: Toggle both directions",
+                "Enter: Finish",
+                "Esc: Cancel"
+            ]
+
+            for i, control in enumerate(controls):
+                blf.position(font_id, 50, 140 + i * 15, 0)
+                blf.draw(font_id, control)
 
     def mouse_to_world_point(self, context, event):
         region = context.region
-        rv3d = context. region_data
+        rv3d = context.region_data
         
         coord = Vector((event.mouse_region_x, event.mouse_region_y))
         view_vector = view3d_utils.region_2d_to_vector_3d(region, rv3d, coord)
@@ -1367,3 +1528,58 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
             )
         
         return world_pos
+    
+    def setup_drawing_plane(self, context):
+        """Depth direction for rectangles is associated with strictly the normals on the plane mesh, not the current view"""
+        rv3d = context.region_data
+
+        self.drawing_plane_center = Vector((0, 0, 0))
+
+        view_matrix = rv3d.view_matrix.inverted()
+
+        self.drawing_plane_normal = -view_matrix.col[2].to_3d()
+        # Consistently follows the plane normal
+        self.drawing_plane_normal.normalize()
+
+        if rv3d.is_orthographic_side_view:
+            abs_normal = Vector((abs(self.drawing_plane_normal.x),
+            abs(self.drawing_plane_normal.y),
+            abs(self.drawing_plane_normal.z)))
+
+            max_component = max(abs_normal)
+
+            if abs_normal.x == max_component:
+                self.drawing_plane_normal = Vector((1, 0, 0)) if self.drawing_plane_normal.x > 0 else Vector((-1, 0, 0))
+             elif abs_normal.y == max_component:
+                self.drawing_plane_normal = Vector((0, 1, 0)) if self.drawing_plane_normal.y > 0 else Vector((0, -1, 0))
+            else:
+                self.drawing_plane_normal = Vector((0, 0, 1)) if self.drawing_plane_normal.z > 0 else Vector((0, 0, -1))
+
+    def add_grid_snapping(self, point, context):
+        if not self.grid_snap or self.shift_held:
+            return point
+        
+        grid_size = self.get_grid_size(context)
+
+        # Create local co-ord system on the drawin gplane
+        plane_normal = self.drawing_plane_normal.normalized()
+        world_up = Vector((0, 0, 1))
+        if abs(plane_normal.dot(world_up)) > 0.9:
+            world_up = Vector((1, 0, 0))
+        
+        local_x = plane_normal.cross(world_up).normalized()
+        local_y = local_x.cross(plane_normal).normalized()
+
+        # Project point onto the drawing plane co-ords
+        if self.start_point:
+            offset = point - self.start_point
+            x_comp = offset.dot(local_x)
+            y_comp = offset.dot(local_y)
+
+            snapped_x = round(x_comp / grid_size) * grid_size
+            snapped_y = round(y_comp / grid_size) * grid_size
+
+            # Convert to world Coords
+            return self.start_point + local_x * snapped_x + local_y * snapped_y
+        
+        return point

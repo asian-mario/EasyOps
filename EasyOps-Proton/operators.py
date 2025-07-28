@@ -1511,6 +1511,7 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
         else:
             controls = [
                 "RMB: Adjust depth",
+                "S: Toggle Square/Rectangle mode",
                 "Wheel: Change depth",
                 "Tab: Change operation",
                 "B: Toggle both directions",

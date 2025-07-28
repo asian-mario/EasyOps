@@ -226,8 +226,8 @@ class EasyOpsPanel(bpy.types.Panel):
         row.operator("object.easy_clean_geometry", text="Clean", icon='BRUSH_DATA')
 
         row = col.row(align=True)
-        row.operator("object.easy_smart_sharpen_edges", text="Flat Shade", icon='MESH_DATA')
-        row.operator("object.easy_smart_smart_apply", text="Smart Apply", icon='CHECKMARK')
+        row.operator("object.easy_sharpen_edges", text="Flat Shade", icon='MESH_DATA')
+        row.operator("object.easy_smart_apply", text="Smart Apply", icon='CHECKMARK')
 
         # Active Modifiers
         if obj and obj.type == 'MESH' and obj.modifiers:

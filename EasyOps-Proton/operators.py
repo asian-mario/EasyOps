@@ -7,6 +7,7 @@ import random
 import math
 from gpu_extras.batch import batch_for_shader
 from mathutils import Vector, Matrix
+from mathutils.bvhtree import BVHTree
 from bpy_extras import view3d_utils
 from bpy.props import EnumProperty, FloatProperty, BoolProperty
 
@@ -727,7 +728,7 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             # Convert the ray into object's local space
             obj_matrix_inv = obj.matrix_world.inverted()
             local_ray_origin = obj_matrix_inv @ ray_origin
-            local_ray_directio = (obj_matrix_inv @ (ray_origin + view_vector))
+            local_ray_direction = (obj_matrix_inv @ (ray_origin + view_vector))
             local_ray_direction.normalize()
 
             # Perform raycast
@@ -738,7 +739,7 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
             bm.from_mesh(obj_eval.data)
             bm.transform(obj.matrix_world)
 
-            bvh = bmesh.geometry.BVHTree.FromBMesh(bm)
+            bvh = BVHTree.FromBMesh(bm)
 
             hit_point, hit_normal, hit_index, hit_distance = bvh.ray_cast(ray_origin, view_vector)
 
@@ -764,7 +765,7 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
     
 
     def add_point(self, context, event, snap_enabled=True):
-        if self.is_surface_drawing_enabled(context):
+        if utils.is_surface_drawing_enabled(context):
             surface_point, surface_normal = self.get_surface_point_and_normal(context, event)
             
             if surface_point and surface_normal:
@@ -1280,6 +1281,7 @@ class OBJECT_OT_easy_freeform_boolean(bpy.types.Operator):
         self.wireframe_obj = obj
 
 # Next plan is to integrate these 'drawing templates' such as Squares or Circles, hopefully we can inherity the FF Boolean class and just use some of their helper functions
+# This bug is BUGGING me -> Why does this make the Freeform boolean class unregister?? What going on
 class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_freeform_boolean):
     """Draw rectangles/squares with a drag to re-size controls"""
     bl_idname = "object.easy_rectangle_boolean"

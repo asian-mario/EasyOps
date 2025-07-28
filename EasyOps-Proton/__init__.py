@@ -58,7 +58,11 @@ def unregister_shortcut():
 
 def register():
     for cls in classes:
-        bpy.utils.register_class(cls)
+        try:
+            print(f"Registering: {cls.__name__}")
+            bpy.utils.register_class(cls)
+        except Exception as e:
+            print(f"Failed to register {cls.__name__}: {e}")
     bpy.types.Scene.easy_utils_props = PointerProperty(type=properties.EasyUtilsProperties)
     register_shortcut()
 

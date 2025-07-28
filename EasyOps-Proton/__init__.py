@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Easy Utils & EasyOps",
     "author": "asianmario",
-    "version": (0, 1, 5),
+    "version": (0, 1, 6),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > Easy Utils",
     "description": "A collection of modelling and cleanup utilities",
@@ -16,6 +16,7 @@ from bpy.props import PointerProperty
 
 from . import properties
 from . import operators
+from . import b_operators
 from . import ui
 
 classes = [
@@ -34,8 +35,8 @@ classes = [
     operators.OBJECT_OT_easy_smart_decimate,
     operators.OBJECT_OT_easy_sharpen_edges,
     operators.OBJECT_OT_easy_ssharpen,
-    operators.OBJECT_OT_easy_freeform_boolean,
-    operators.OBJECT_OT_easy_rectangle_boolean,
+    b_operators.OBJECT_OT_easy_freeform_boolean,
+    b_operators.OBJECT_OT_easy_rectangle_boolean,
     ui.OBJECT_MT_easy_radial_menu,
     ui.EasyUtilsPanel,
     ui.EasyOpsPanel,

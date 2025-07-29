@@ -76,3 +76,5 @@ class EasyUtilsProperties(bpy.types.PropertyGroup):
         description="Draw booleans on object surface using normals",
         default=False
     )
+
+    

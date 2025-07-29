@@ -31,6 +31,7 @@ classes = [
     operators.OBJECT_OT_easy_boolean_difference,
     operators.OBJECT_OT_easy_boolean_union,
     operators.OBJECT_OT_easy_boolean_intersect,
+    operators.OBJECT_OT_easy_boolean_slice,
     operators.OBJECT_OT_easy_smart_apply,
     operators.OBJECT_OT_easy_smart_decimate,
     operators.OBJECT_OT_easy_sharpen_edges,

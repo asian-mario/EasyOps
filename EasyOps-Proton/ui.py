@@ -15,7 +15,6 @@ class OBJECT_MT_easy_radial_menu(bpy.types.Menu):
             pie.operator("object.easy_smart_apply",       icon='CHECKMARK')
             ff_op = pie.operator("object.easy_freeform_boolean", text="FreeForm", icon='GREASEPENCIL')
             pie.operator("object.easy_smart_uv_unwrap",   icon='UV') 
-            # These currently do not load. I will check the iconpacks.
             pie.operator("object.easy_clean_geometry",    icon='BRUSH_DATA')
             pie.operator("object.easy_shade_smooth",    icon='SURFACE_NSURFACE')
             pie.operator("object.assign_random_materials",icon='MATERIAL')
@@ -23,9 +22,10 @@ class OBJECT_MT_easy_radial_menu(bpy.types.Menu):
             ff_op.operation = 'DIFFERENCE'
 
         elif len(sel) >= 2:
-            pie.operator("object.easy_boolean_difference",icon='MOD_BOOLEAN')
-            pie.operator("object.easy_boolean_union",     icon='MOD_BOOLEAN')
-            pie.operator("object.easy_boolean_intersect", icon='MOD_BOOLEAN')
+            pie.operator("object.easy_boolean_difference",icon='SELECT_SUBTRACT')
+            pie.operator("object.easy_boolean_union",     icon='SELECT_EXTEND')
+            pie.operator("object.easy_boolean_intersect", icon='SELECT_INTERSECT')
+            pie.operator("object.easy_boolean_slice", icon='MOD_BOOLEAN')
             pie.operator("object.easy_smart_uv_unwrap",   icon='UV')
             ff_op = pie.operator("object.easy_freeform_boolean", text="FreeForm Diff", icon='SELECT_SUBTRACT')
             ff_op.operation = 'DIFFERENCE'
@@ -166,6 +166,7 @@ class EasyOpsPanel(bpy.types.Panel):
         row.operator("object.easy_boolean_difference", text="Diff", icon='SELECT_SUBTRACT')
         row.operator("object.easy_boolean_union", text="Union", icon='SELECT_EXTEND')
         row.operator("object.easy_boolean_intersect", text="Int", icon='SELECT_INTERSECT')
+        row.operator("object.easy_boolean_slice", text="Slice", icon='MOD_BOOLEAN')
 
         # Freeform Booleans
         main_col.separator(factor=0.3)

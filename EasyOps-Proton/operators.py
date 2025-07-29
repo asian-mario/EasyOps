@@ -247,6 +247,39 @@ class OBJECT_OT_easy_boolean_intersect(bpy.types.Operator):
         self.report({'INFO'}, "Boolean Intersect applied.")
         return {'FINISHED'}
 
+class OBJECT_OT_easy_boolean_slice(bpy.types.Operator):
+    """Slice Boolean"""
+    bl_idname = "object.easy_boolean_slice"
+    bl_label = "Boolean Slice"
+    bl_options = {'REGISTER', 'UNDO'}
+
+
+    def execute(self, context):
+        active = context.view_layer.objects.active
+        targets = [obj for obj in context.selected_objects if obj != active and obj.type == 'MESH']
+
+        if not targets:
+            self.report({'WARNING'}, "No valid target objects selected.")
+            return {'CANCELLED'}
+
+        for target in targets:
+            target_copy = target.copy()
+            target_copy.data = target.data.copy()
+            target_copy.name = target.name + "_Slice"
+            context.collection.objects.link(target_copy)
+
+            diff_mod = target.modifiers.new("Slice_Difference", "BOOLEAN")
+            diff_mod.operation = 'DIFFERENCE'
+            diff_mod.object = active
+
+            intersect_mod = target_copy.modifiers.new("Slice_Intersect", "BOOLEAN")
+            intersect_mod.operation = 'INTERSECT'
+            intersect_mod.object = active
+            
+        utils.turn_into_wireframe(active)
+        self.report({'INFO'}, "Boolean Slice applied.")
+        return {'FINISHED'}
+
 
 class OBJECT_OT_easy_smart_apply(bpy.types.Operator):
     """Apply only valid boolean modifiers, remove dead ones"""

@@ -28,10 +28,10 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
             ('DIFFERENCE', "Difference", "Subtract the drawn shape"),
             ('UNION', "Union", "Add the drawn shape"),
             ('INTERSECT', "Intersect", "Keep only intersection"),
+            ('SLICE', "Slice", "Cut and seperate the mesh into parts")
         ],
         default='DIFFERENCE'
     )
-    
     extrude_depth: FloatProperty(
         name="Extrude Depth",
         description="How deep to extrude the drawn shape",
@@ -380,7 +380,7 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
         
         elif event.type == 'TAB' and event.value == 'PRESS':
             # Cycle through boolean operations
-            operations = ['DIFFERENCE', 'UNION', 'INTERSECT']
+            operations = ['DIFFERENCE', 'UNION', 'INTERSECT', 'SLICE']
             current_index = operations.index(self.operation)
             next_index = (current_index + 1) % len(operations)
             self.operation = operations[next_index]
@@ -608,6 +608,48 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
             traceback.print_exc()
             return []
     
+    def create_slice_boolean(self, context, boolean_obj):
+        results = []
+
+        for target in self.target_objects:
+            if target.type != 'MESH':
+                continue
+                
+            target_copy = target.copy()
+            target_copy.data = target.data.copy()
+            target_copy.name = target.name + "_Slice"
+            context.collection.objects.link(target_copy)
+
+            # Copy target bevel
+            """
+            bevel_counter = 0
+            for modifier in target.modifiers:
+                if modifier.type == 'BEVEL' and bevel_counter < 1:
+                    new_mod = target_copy.modifiers.new(modifier.name, 'BEVEL')
+                
+                for prop in modifier.bl_rna.properties:
+                    if not prop.is_readonly and prop.identifier != 'rna_type':
+                        try:
+                            setattr(new_mod, prop.identifier, getattr(modifier, prop.identifier))
+                        except:
+                            pass
+                bevel_counter += 1
+            """
+
+            diff_mod = target.modifiers.new("Slice_Difference", "BOOLEAN")
+            diff_mod.operation = 'DIFFERENCE'
+            diff_mod.object = boolean_obj
+
+            intersect_mod = target_copy.modifiers.new("Slice_Intersect", "BOOLEAN")
+            intersect_mod.operation = 'INTERSECT'
+            intersect_mod.object = boolean_obj
+
+            results.extend([target, target_copy])
+
+            print(f"Slice created: {target.name} (difference) and {target_copy.name} (intersect)")
+        return results
+
+
     def create_boolean_mesh(self, context):
         """Create the boolean mesh from drawn points"""
         if len(self.points) < 3:
@@ -644,22 +686,30 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
             extrude = bmesh.ops.extrude_face_region(bm, geom=[face])
             verts_extruded = [e for e in extrude['geom'] if isinstance(e, bmesh.types.BMVert)]
             bmesh.ops.translate(bm, vec=extrude_vector, verts=verts_extruded)
-        
+
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
         # Update mesh
         bm.to_mesh(mesh)
         bm.free()
+
+        mesh.calc_loop_triangles()
         
         # Add to scene
         context.collection.objects.link(obj)
         
-        # Apply boolean to target objects
-        for target in self.target_objects:
-            if target.type == 'MESH':
-                mod = target.modifiers.new("FreeForm Boolean", 'BOOLEAN')
-                mod.operation = self.operation
-                mod.object = obj
+        # Slice
+        if self.operation == 'SLICE':
+            self.create_slice_boolean(context, obj)
 
-        
+        else:
+            # Apply boolean to target objects
+            for target in self.target_objects:
+                if target.type == 'MESH':
+                    mod = target.modifiers.new("FreeForm Boolean", 'BOOLEAN')
+                    mod.operation = self.operation
+                    mod.object = obj
+
         # Turn boolean object into wireframe and move to cuts collection
         utils.turn_into_wireframe(obj)
         
@@ -682,22 +732,27 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
                     color = (1.0, 0.3, 0.3, 0.3)  # Red with transparency
                 elif self.operation == 'UNION':
                     color = (0.3, 1.0, 0.3, 0.3)  # Green with transparency
-                else:  # INTERSECT
-                    color = (0.3, 0.3, 1.0, 0.3)  # Blue with transparency
+                elif self.operation == 'INTERSECT':  # INTERSECT
+                    color = (0.3, 0.3, 1.0, 0.3)  # Blue with transparenct
+                else:
+                    color = (1.0, 0.6, 0.0, 0.3)
+                    
                 
                 self.preview_shader.bind()
                 self.preview_shader.uniform_float("color", color)
                 self.preview_batch.draw(self.preview_shader)
             
             # Freeview for FF
-            if hasattr(self, 'wireframe_batch') and self.wireframe_batch and hsattr(self, 'wireframe_shader') and self.wireframe_shader:
+            if hasattr(self, 'wireframe_batch') and self.wireframe_batch and hasattr(self, 'wireframe_shader') and self.wireframe_shader:
                 if self.operation == 'DIFFERENCE':
                     color = (1.0, 0.5, 0.5, 0.8)  # Red with transparency
                 elif self.operation == 'UNION':
                     color = (0.5, 1.0, 0.5, 0.8)  # Green with transparency
-                else:  # INTERSECT
+                elif self.operation == 'INTERSECT':  # INTERSECT
                     color = (0.5, 0.5, 1.0, 0.8)  # Blue with transparency
-                
+                else:
+                    color = (1.0, 0.6, 0.0, 0.3)
+
                 self.wireframe_shader.bind()
                 self.wireframe_shader.uniform_float("color", wire_color)
                 self.wireframe_batch.draw(self.wireframe_shader)
@@ -1046,7 +1101,7 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_free_boolean_base):
         
         elif event.type == 'S' and event.value == 'PRESS':
             # Toggle 1:1 (Square) definition mode
-            self.maintain_aspect = not maintain_aspect
+            self.maintain_aspect = not self.maintain_aspect
             mode_text = "Square" if self.maintain_aspect else "Rectangle"
             self.report({'INFO'}, f"Mode: {mode_text}")
             if self.is_dragging:
@@ -1055,8 +1110,8 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_free_boolean_base):
         
         elif event.type == 'TAB' and event.value == 'PRESS':
             # Cycle boolean operations
-            operations = ['DIFFERENCE', 'UNION', 'INTERSECT']
-            current_index = operations.index(self.operations)
+            operations = ['DIFFERENCE', 'UNION', 'INTERSECT', 'SLICE']
+            current_index = operations.index(self.operation)
             next_index = (current_index + 1) % len(operations)
             self.operation = operations[next_index]
             self.report({'INFO'}, f"Boolean operation: {self.operation}")
@@ -1162,9 +1217,13 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_free_boolean_base):
         elif self.operation == 'UNION':
             line_color = (0.4, 1.0, 0.4, 0.8)  # Green
             fill_color = (0.4, 1.0, 0.4, 0.2)  # Green with transparency
-        else:  # INTERSECT
+        elif self.operation == 'INTERSECT':  # INTERSECT
             line_color = (0.4, 0.4, 1.0, 0.8)  # Blue
             fill_color = (0.4, 0.4, 1.0, 0.2)  # Blue with transparency
+        else:
+            line_color = (1.0, 0.6, 0.0, 0.8)
+            fill_color = (1.0, 0.6, 0.0, 0.2)
+
 
         shader = gpu.shader.from_builtin('UNIFORM_COLOR')
 

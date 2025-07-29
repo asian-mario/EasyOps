@@ -17,7 +17,7 @@ class OBJECT_MT_easy_radial_menu(bpy.types.Menu):
             pie.operator("object.easy_smart_uv_unwrap",   icon='UV') 
             # These currently do not load. I will check the iconpacks.
             pie.operator("object.easy_clean_geometry",    icon='BRUSH_DATA')
-            pie.operator("object.easy_remove_doubles",    icon='X')
+            pie.operator("object.easy_shade_smooth",    icon='SURFACE_NSURFACE')
             pie.operator("object.assign_random_materials",icon='MATERIAL')
             
             ff_op.operation = 'DIFFERENCE'
@@ -197,6 +197,9 @@ class EasyOpsPanel(bpy.types.Panel):
         op = ff_row.operator("object.easy_freeform_boolean", text="FF∩", icon='SELECT_INTERSECT')
         op.operation = 'INTERSECT'
 
+        op = ff_row.operator("object.easy_freeform_boolean", text="FF/", icon='MOD_BOOLEAN')
+        op.operation = 'SLICE'
+
         ff_col.separator(factor=0.3)
 
         # Template Booleans
@@ -210,6 +213,8 @@ class EasyOpsPanel(bpy.types.Panel):
         op.operation = 'UNION'
         op = tb_row.operator("object.easy_rectangle_boolean", text="◰∩", icon='SELECT_INTERSECT')
         op.operation = 'INTERSECT'
+        op = tb_row.operator("object.easy_rectangle_boolean", text="◰/", icon='MOD_BOOLEAN')
+        op.operation = 'SLICE'
     
 
         # Modelling Tools

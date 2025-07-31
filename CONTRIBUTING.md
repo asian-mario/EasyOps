@@ -47,4 +47,4 @@ The aim of this repository is:
 
   - To provide a high-quality hardsurface workflow tool for modern Blender versions
   - Invite a community of new and veteran 3D artists
-  - Help inspire a community of open-source Blender Addon developers and KEEP it open-source, just as Ton Roosendaal intended.
+  - Help inspire a community of open-source Blender Addon developers and KEEP it free.

@@ -411,6 +411,9 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
         closest_hit = None
         closest_distance = float('inf')
         closest_normal = None
+        closest_face_center = None
+
+        camera_direction = -rv3d.view_matrix.inverted().col[2].to_3d().normalized()
 
         # Try a raycast on each target object
         for obj in self.target_objects:
@@ -1147,7 +1150,7 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_free_boolean_base):
         else:
             raw_point = self.get_plane_intersection_point(context, event)
         
-        self.current_plot = self.add_grid_snapping(raw_point, context) if raw_point else self.start_point
+        self.current_point = self.add_grid_snapping(raw_point, context) if raw_point else self.start_point
         self.generate_rectangle_points()
 
         self.update_preview(context)
@@ -1350,9 +1353,9 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_free_boolean_base):
                 "Esc: Cancel"
             ]
 
-            for i, control in enumerate(controls):
-                blf.position(font_id, 50, 140 + i * 15, 0)
-                blf.draw(font_id, control)
+        for i, control in enumerate(controls):
+            blf.position(font_id, 50, 140 + i * 15, 0)
+            blf.draw(font_id, control)
 
     def mouse_to_world_point(self, context, event):
         if utils.is_surface_drawing_enabled(context):
@@ -1385,6 +1388,7 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_free_boolean_base):
             )
         
         return world_pos
+    
     
     def setup_drawing_plane(self, context):
         """Depth direction for rectangles is associated with strictly the normals on the plane mesh, not the current view"""

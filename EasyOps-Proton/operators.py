@@ -362,3 +362,23 @@ class OBJECT_OT_easy_ssharpen(bpy.types.Operator):
         self.report({'INFO'}, "SSharpen complete.")
         return {'FINISHED'}
 
+
+class OBJECT_OT_easy_quad_remesh(bpy.types.Operator):
+    """Quad remesh"""
+    bl_idname = "object.easy_quad_remesh"
+    bl_label = "Quad Remesh"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        for obj in utils.get_target_objects(context):
+            if obj.type == 'MESH' and not any(m.type=='REMESH' for m in obj.modifiers):
+                mod = obj.modifiers.new("QuadRemesh", 'REMESH')
+                mod.mode = 'SHARP' 
+                mod.octree_depth = 5
+                mod.scale = 0.9
+                mod.sharpness = 1.0
+                mod.use_remove_disconnected = False
+        self.report({'INFO'}, "Quad Remesh modifier added.")
+        return {'FINISHED'}
+
+

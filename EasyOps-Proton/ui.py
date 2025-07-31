@@ -146,11 +146,15 @@ class EasyOpsPanel(bpy.types.Panel):
         # Bevel
         box = main_col.box()
         header = box.row(align=True)
-        header.label(text="Bevel", icon="MOD_BEVEL")
+        header.label(text="Modifiers", icon="MOD_BEVEL")
 
         col = box.column(align=True)
         col.scale_y = 1.2
-        col.operator("object.easy_bevel", text="Add Bevel", icon='MOD_BEVEL')
+        
+        row = col.row(align=True)
+        row.operator("object.easy_bevel", text="Bevel", icon='MOD_BEVEL')
+        row.operator("object.easy_quad_remesh", text="Quad Remesh", icon='MOD_REMESH')
+        
 
         # Boolean Operations
         main_col.separator(factor=0.5)
@@ -247,6 +251,8 @@ class EasyOpsPanel(bpy.types.Panel):
                     self.draw_bevel_modifier(mod_box, m)
                 elif m.type == 'DECIMATE':
                     self.draw_decimate_modifier(mod_box, m)
+                elif m.type == 'REMESH':
+                    self.draw_remesh_modifier(mod_box, m)
     
     """Im doing this entire commit on a friday so i'm lazy. Will comment later"""
 
@@ -256,6 +262,9 @@ class EasyOpsPanel(bpy.types.Panel):
             header = box.row(align=True)
             header.prop(modifier, "show_viewport", text="", icon='RESTRICT_VIEW_OFF' if modifier.show_viewport else 'RESTRICT_VIEW_ON')
             header.label(text=f"Bevel: {modifier.name}", icon='MOD_BEVEL')
+
+            delete_op = header.operator("object.modifier_remove", text="", icon="X")
+            delete_op.modifier = modifier.name
 
             col = box.column(align=True)
             col.scale_y = 0.9
@@ -273,8 +282,35 @@ class EasyOpsPanel(bpy.types.Panel):
         header.prop(modifier, "show_viewport", text="", icon='RESTRICT_VIEW_OFF' if modifier.show_viewport else 'RESTRICT_VIEW_ON')
         header.label(text=f"Decimate: {modifier.name}", icon='MOD_DECIM')
 
+        delete_op = header.operator("object.modifier_remove", text="", icon="X")
+        delete_op.modifier = modifier.name
+
         col = box.column(align=True)
         col.scale_y = 0.9
         col.prop(modifier, "ratio", text="Ratio", slider=True)
+
+    def draw_remesh_modifier(self, layout, modifier):
+        box = layout.box()
+
+        header = box.row(align=True)
+        header.prop(modifier, "show_viewport", text="", icon='RESTRICT_VIEW_OFF' if modifier.show_viewport else 'RESTRICT_VIEW_ON')
+        header.label(text=f"Remesh: {modifier.name}", icon='MOD_REMESH')
+
+        
+        delete_op = header.operator("object.modifier_remove", text="", icon="X")
+        delete_op.modifier = modifier.name
+        
+        col = box.column(align=True)
+        col.scale_y = 0.9
+
+        row = col.row(align=True)
+        row.prop(modifier, "mode", text="")
+        row.prop(modifier, "octree_depth", text="Depth")
+
+        if modifier.mode == 'SHARP':
+            col.prop(modifier, "scale", text="Scale", slider=True)
+            col.prop(modifier, "sharpness", text="Sharpness", slider=True)
+        
+        col.prop(modifier, "use_remove_disconnected", text="Remove Disconnected")
 
 # TODO: Status and Info

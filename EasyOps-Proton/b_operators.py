@@ -300,6 +300,8 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
                 depth_change = delta_y * 0.01  # Sensitivity factor
                 self.current_depth = max(0.01, self.initial_depth + depth_change)
                 self.update_preview(context)
+                self.update_wireframe_preview(context)
+
             return {'RUNNING_MODAL'}
         
         elif event.type == 'LEFTMOUSE' and event.value == 'PRESS':
@@ -307,6 +309,8 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
                 # Add point to polygon
                 self.add_point(context, event, snap_enabled)
                 self.update_preview(context)
+                self.update_wireframe_preview(context)
+
             return {'RUNNING_MODAL'}
         
         elif event.type == 'RIGHTMOUSE' and event.value == 'PRESS':

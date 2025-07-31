@@ -412,8 +412,10 @@ class OBJECT_OT_easy_ssharpen(bpy.types.Operator):
 
                 if self.apply_modifiers:
                     self.smart_apply_modifiers(obj)
+                    utils.recalculate_normals_for_objects(context, [obj])
 
                 bpy.ops.object.mode_set(mode='EDIT')
+                bpy.ops.mesh.select_mode(type='EDGE')
                 bpy.ops.mesh.select_all(action='SELECT')
 
                 bpy.ops.mesh.mark_sharp(clear=True)

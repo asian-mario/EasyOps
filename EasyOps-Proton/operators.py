@@ -9,7 +9,7 @@ from gpu_extras.batch import batch_for_shader
 from mathutils import Vector, Matrix
 from mathutils.bvhtree import BVHTree
 from bpy_extras import view3d_utils
-from bpy.props import EnumProperty, FloatProperty, BoolProperty
+from bpy.props import EnumProperty, FloatProperty, BoolProperty, IntProperty
 
 from . import utils
 
@@ -353,14 +353,124 @@ class OBJECT_OT_easy_ssharpen(bpy.types.Operator):
     bl_label = "SSharpen"
     bl_options = {'REGISTER', 'UNDO'}
 
+    apply_modifiers: BoolProperty(
+        name="Apply Modifiers",
+        description="Apply all modifiers before sharpening",
+        default=True
+    )
+
+    sharpness_angle: FloatProperty(
+        name="Sharpness Angle", 
+        description="Angle threshold for edge detection",
+        default=math.radians(30),
+        min=math.radians(1),
+        max=math.radians(180),
+        unit='ROTATION'
+    )
+
+    bevel_width: FloatProperty(
+        name="Bevel Width",
+        description="Width of the bevel modifier", 
+        default=0.02,
+        min=0.001,
+        max=1.0
+    )
+
+    bevel_segments: IntProperty(
+        name="Bevel Segments",
+        description="Number of bevel segments",
+        default=3,
+        min=1,
+        max=12
+    )
+
+    # AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA THIS STINKS IT ALL STINKS WHY WHY WHY! DOES THE DEBUGGER NOT WORK AT ALL
+    # I CANT GET NOTING DONE BECAUSE EVERYTIME I MAKE A MISTAKE I HAVE TO LOAD IT IN BLENDER AND THEN UNLOAD IT WHICH TAKES
+    # GODDAMN AGES AND THE EXTENSION DOESNT WORK YOU STINK
+
     def execute(self, context):
+        processed_count = 0
+
         for obj in utils.get_target_objects(context):
             if obj.type == 'MESH':
-                utils.detect_sharp_edges(obj)
-                utils.apply_bevel_modifier(obj)
+                context.view_layer.objects.active = obj
+
+                if self.apply_modifiers:
+                    self.smart_apply_modifiers(obj)
+
+                bpy.ops.object.mode_set(mode='EDIT')
+                bpy.ops.mesh.select_all(action='SELECT')
+
+                bpy.ops.mesh.mark_sharp(clear=True)
+
+                bpy.ops.mesh.select_all(action='DESELECT')
+                bpy.ops.mesh.edges_select_sharp(sharpness=self.sharpness_angle)
+                bpy.ops.mesh.mark_sharp()
+
+                bpy.ops.object.mode_set(mode='OBJECT')
+
+                if not any(mod.type == 'BEVEL' for mod in obj.modifiers):
+                    bevel_mod = obj.modifiers.new("SSharpen_Bevel", 'BEVEL')
+                    bevel_mod.limit_method = 'ANGLE'
+                    bevel_mod.angle_limit = self.sharpness_angle
+                    bevel_mod.width = self.bevel_width
+                    bevel_mod.segments = self.bevel_segments
+                    bevel_mod.profile = 0.7
+                
                 bpy.ops.object.shade_smooth()
-        self.report({'INFO'}, "SSharpen complete.")
+
+                processed_count += 1
+        
+        self.report({'INFO'}, f"SSharpen applied to {processed_count} objects.")
         return {'FINISHED'}
+
+    def smart_apply_modifiers(self, obj):
+        if not obj.modifiers:
+            return
+
+        priority_order = {
+            'BOOLEAN': 1,      
+            'MIRROR': 2,     
+            'ARRAY': 3,       
+            'SOLIDIFY': 4,    
+            # 'BEVEL': 5,    LOL ARE U FKN STUPID?    
+            'REMESH': 5,     
+            'DECIMATE': 6,    
+            'SUBSURF': 7,     
+        }
+
+        priority_mods = []
+        other_mods = []
+
+        for mod in obj.modifiers:
+            if mod.type in priority_order:
+                priority_mods.append((priority_order[mod.type], mod))
+            else:
+                other_mods.append(mod)
+        
+        priority_mods.sort(key=lambda x: x[0])
+
+        for _, mod in priority_mods:
+            if mod.type == 'BOOLEAN' and (not mod.object or mod.object.name not in bpy.data.objects):
+                obj.modifiers.remove(mod)
+                continue
+            
+            try:
+                bpy.ops.object.modifier_apply(modifier=mod.name)
+            except:
+                if mod.name in obj.modifiers:
+                    obj.modifiers.remove(mod)
+
+        for mod in other_mods:
+            try:
+                if mod.type != 'BEVEL':
+                    bpy.ops.object.modifier_apply(modifier=mod.name)
+            except:
+                if mod.name in obj.modifiers:
+                    obj.modifiers.remove(mod)
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
 
 
 class OBJECT_OT_easy_quad_remesh(bpy.types.Operator):

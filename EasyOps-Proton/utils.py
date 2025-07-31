@@ -62,3 +62,27 @@ def enable_auto_smooth(obj, angle=30):
 
 def is_surface_drawing_enabled(context):
     return hasattr(context.scene, 'easy_utils_props') and context.scene.easy_utils_props.surface_drawing_mode
+
+def recalculate_normals_for_objects(context, objects):
+    if not objects:
+        return
+    
+    original_active = context.view_layer.objects.active
+    original_mode = context.mode
+
+    try:
+        for obj in objects:
+            if obj.type == 'MESH':
+                context.view_layer.objects.active = obj
+                bpy.ops.object.mode_set(mode='EDIT')
+                bpy.ops.mesh.select_all(action='SELECT')
+                bpy.ops.mesh.normals_make_consistent(inside=False)
+                bpy.ops.object.mode_set(mode='OBJECT')
+    
+    finally:
+        context.view_layer.objects.active = original_active
+        if original_mode != 'OBJECT':
+            try:
+                bpy.ops.object.mode_set(mode=original_mode.replace('_','').lower())
+            except:
+                pass

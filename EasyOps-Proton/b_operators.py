@@ -408,18 +408,15 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
         view_vector = view3d_utils.region_2d_to_vector_3d(region, rv3d, coord)
         ray_origin = view3d_utils.region_2d_to_vector_3d(region, rv3d, coord)
 
+        closest_hit = None
+        closest_distance = float('inf')
+        closest_normal = None
+
         # Try a raycast on each target object
         for obj in self.target_objects:
             if obj.type != 'MESH':
                 continue
 
-            # Convert the ray into object's local space
-            obj_matrix_inv = obj.matrix_world.inverted()
-            local_ray_origin = obj_matrix_inv @ ray_origin
-            local_ray_direction = (obj_matrix_inv @ (ray_origin + view_vector))
-            local_ray_direction.normalize()
-
-            # Perform raycast
             depsgraph = context.evaluated_depsgraph_get()
             obj_eval = obj.evaluated_get(depsgraph)
 
@@ -433,10 +430,12 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
 
             bm.free()
 
-            if hit_point:
-                return hit_point, hit_normal
+            if hit_point and hit_distance < closest_distance:
+                closest_hit = hit_point
+                closest_distance = hit_distance
+                closest_normal = hit_normal
         
-        return None, None
+        return closest_hit, closest_normal
     
     # Same same but different
     def setup_surface_drawing_plane(self, context, surface_point, surface_normal):
@@ -457,7 +456,7 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
             surface_point, surface_normal = self.get_surface_point_and_normal(context, event)
             
             if surface_point and surface_normal:
-                self.setup_surface_drawing_plane(context, event)
+                self.setup_surface_drawing_plane(context, surface_point, surface_normal)
                 world_pos = surface_point
             else:
                 world_pos = self.get_plane_intersection_point(context, event)
@@ -1028,6 +1027,8 @@ class OBJECT_OT_easy_freeform_boolean(OBJECT_OT_easy_free_boolean_base):
     bl_idname = "object.easy_freeform_boolean"
     bl_label = "FreeForm Boolean"
     bl_options = {'REGISTER', 'UNDO', 'BLOCKING'}
+
+    # this is so funny man
     
 
 # Next plan is to integrate these 'drawing templates' such as Squares or Circles, hopefully we can inherity the FF Boolean class and just use some of their helper functions
@@ -1135,23 +1136,22 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_free_boolean_base):
         self.is_dragging = True
 
         self.points = []
-
+    
     def update_rectangle(self, context, event):
         """Update dimensions while dragging"""
         if not self.start_point:
             return
 
-        self.update_preview(context)
-        self.update_wireframe_preview(context)
-
-        raw_point = self.mouse_to_world_point(context, event)
-        self.current_point = self.add_grid_snapping(raw_point, context)
+        if not self.ensure_surface_plane_consistency(context):
+            raw_point = self.mouse_to_world_point(context, event)
+        else:
+            raw_point = self.get_plane_intersection_point(context, event)
+        
+        self.current_plot = self.add_grid_snapping(raw_point, context) if raw_point else self.start_point
         self.generate_rectangle_points()
 
-        # Update preview
         self.update_preview(context)
         self.update_wireframe_preview(context)
-
     
     def finish_rectangle(self, context, event):
         """Switch to depth adjustment"""
@@ -1440,3 +1440,8 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_free_boolean_base):
             return self.start_point + local_x * snapped_x + local_y * snapped_y
         
         return point
+    
+    def ensure_surface_plane_consistency(self, context):
+        if utils.is_surface_drawing_enabled(context) and hasattr(self, 'start_point') and self.start_point:
+            return True
+        return False

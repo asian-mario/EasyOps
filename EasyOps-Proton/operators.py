@@ -202,11 +202,16 @@ class OBJECT_OT_easy_boolean_difference(bpy.types.Operator):
 
     def execute(self, context):
         active = context.view_layer.objects.active
+        modified_objects = []
+
         for obj in utils.get_target_objects(context):
             if obj.type == 'MESH' and obj is not active:
                 mod = obj.modifiers.new("Boolean Difference", 'BOOLEAN')
                 mod.operation = 'DIFFERENCE'
                 mod.object = active
+                modified_objects.append(obj)
+        
+        utils.recalculate_normals_for_objects(context, modified_objects)
         utils.turn_into_wireframe(active)
         self.report({'INFO'}, "Boolean Difference applied.")
         return {'FINISHED'}
@@ -220,11 +225,15 @@ class OBJECT_OT_easy_boolean_union(bpy.types.Operator):
 
     def execute(self, context):
         active = context.view_layer.objects.active
+        modified_objects = []
         for obj in utils.get_target_objects(context):
             if obj.type == 'MESH' and obj is not active:
                 mod = obj.modifiers.new("Boolean Union", 'BOOLEAN')
                 mod.operation = 'UNION'
                 mod.object = active
+                modified_objects.append(obj)
+
+        utils.recalculate_normals_for_objects(context, modified_objects)
         utils.turn_into_wireframe(active)
         self.report({'INFO'}, "Boolean Union applied.")
         return {'FINISHED'}
@@ -235,14 +244,18 @@ class OBJECT_OT_easy_boolean_intersect(bpy.types.Operator):
     bl_idname = "object.easy_boolean_intersect"
     bl_label = "Boolean Intersect"
     bl_options = {'REGISTER', 'UNDO'}
-
+    
     def execute(self, context):
         active = context.view_layer.objects.active
+        modified_objects = []
         for obj in utils.get_target_objects(context):
             if obj.type == 'MESH' and obj is not active:
                 mod = obj.modifiers.new("Boolean Intersect", 'BOOLEAN')
                 mod.operation = 'INTERSECT'
                 mod.object = active
+                modified_objects.append(obj)
+
+        utils.recalculate_normals_for_objects(context, modified_objects)
         utils.turn_into_wireframe(active)
         self.report({'INFO'}, "Boolean Intersect applied.")
         return {'FINISHED'}
@@ -275,6 +288,8 @@ class OBJECT_OT_easy_boolean_slice(bpy.types.Operator):
             intersect_mod = target_copy.modifiers.new("Slice_Intersect", "BOOLEAN")
             intersect_mod.operation = 'INTERSECT'
             intersect_mod.object = active
+
+        utils.recalculate_normals_for_objects(context, targets)
             
         utils.turn_into_wireframe(active)
         self.report({'INFO'}, "Boolean Slice applied.")

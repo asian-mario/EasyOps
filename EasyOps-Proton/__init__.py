@@ -37,6 +37,7 @@ classes = [
     operators.OBJECT_OT_easy_sharpen_edges,
     operators.OBJECT_OT_easy_ssharpen,
     operators.OBJECT_OT_easy_quad_remesh,
+    operators.OBJECT_OT_easy_mirror,
     b_operators.OBJECT_OT_easy_freeform_boolean,
     b_operators.OBJECT_OT_easy_rectangle_boolean,
     ui.OBJECT_MT_easy_radial_menu,

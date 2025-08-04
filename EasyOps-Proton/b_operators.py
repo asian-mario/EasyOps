@@ -370,6 +370,7 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
             if self.points:
                 self.points.pop()
                 self.update_preview(context)
+                self.update_wireframe_preview(context)
             return {'RUNNING_MODAL'}
         
         elif event.type == 'B' and event.value == 'PRESS':

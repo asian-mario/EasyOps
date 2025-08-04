@@ -509,3 +509,168 @@ class OBJECT_OT_easy_quad_remesh(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class OBJECT_OT_easy_mirror(bpy.types.Operator):
+    """Smart mirror with axis detection + clipping"""
+    bl_idname = "object.easy_mirror"
+    bl_label = "Smart Mirror"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    axis: EnumProperty(
+        name="Mirror Axis",
+        description="Axis to mirror across",
+        items=[
+            ('AUTO', "Auto", "Detect axis automatically based on object bounds"),
+            ('X', "X", "Mirror across X axis"),
+            ('Y', "Y", "Mirror across Y axis"),     
+            ('Z', "Z", "Mirror across Z axis"),
+            ('XY', "XY", "Mirror across X and Y axes"),
+            ('XZ', "XZ", "Mirror across X and Z axes"),
+            ('YZ', "YZ", "Mirror across Y and Z axes"),
+            ('XYZ', "XYZ", "Mirror across all axes"),
+        ],
+        default='AUTO'
+    )
+
+    use_clip: BoolProperty(
+        name="Use Clipping",
+        description="Prevent vertices from crossing the mirror plane",
+        default=True
+    )
+
+    use_merge: BoolProperty(
+        name="Use Merge",
+        description="Merge vertices at the mirror plane of the object",
+        default=True
+    )
+
+    merge_threshold: FloatProperty(
+        name="Merge Threshold",
+        description="Distance threshold when merging vertices",
+        default=0.001,
+        min=0.0,   
+        max=1.0,
+        precision=4
+    )
+
+    use_bisect: BoolProperty(
+        name="Bisect",
+        description="Cut the mesh along the mirror plane",
+        default=True
+    )
+
+    clear_existing: BoolProperty(
+        name="Clear Existing Mirrors",
+        description="Remove existing mirror modifiers",
+        default=True
+    )
+
+    def get_auto_axis(self, obj):
+        if not obj or obj.type != 'MESH':
+            return 'X'
+        
+        bbox = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+        
+        min_x = min(corner.x for corner in bbox)
+        max_x = max(corner.x for corner in bbox)
+        min_y = min(corner.y for corner in bbox)
+        max_y = max(corner.y for corner in bbox)
+        min_z = min(corner.z for corner in bbox)
+        max_z = max(corner.z for corner in bbox)
+
+        center_x = (min_x + max_x) / 2
+        center_y = (min_y + max_y) / 2
+        center_z = (min_z + max_z) / 2
+
+        offsets = {
+            'X': abs(center_x),
+            'Y': abs(center_y),
+            'Z': abs(center_z),
+        }
+        return min(offsets, key=offsets.get)
+
+    def add_mirror_modifier(self, obj, axis_name, use_x=False, use_y=False, use_z=False):
+        """Mirror modifier with specified settigs"""
+        mod_name = f"Mirror_{axis_name}"
+
+        if self.clear_existing:
+            existing = obj.modifiers.get(mod_name)
+            if existing:
+                obj.modifiers.remove(existing)
+        
+        if not self.clear_existing and any(m.type == 'MIRROR' and m.use_axis[0] == use_x and m_use_axis[1] == use_y and m.use_axis[2] == use_z for m in obj.modifiers):
+            return False
+        
+        mirror_mod = obj.modifiers.new(name=mod_name, type='MIRROR')
+        mirror_mod.use_axis = (use_x, use_y, use_z)
+        mirror_mod.use_clip = self.use_clip
+        mirror_mod.use_bisect_axis = (
+            self.use_bisect and use_x, 
+            self.use_bisect and use_y, 
+            self.use_bisect and use_z
+        )
+
+        if self.use_merge:
+            mirror_mod.merge_threshold = self.merge_threshold
+        
+        return True
+    
+    def execute(self, context):
+        targets = utils.get_target_objects(context)
+        if not targets:
+            self.report({'WARNING'}, "No mesh objects found")
+            return {'CANCELLED'}
+        
+        processed_count = 0
+        for obj in targets:
+            if obj.type != 'MESH':
+                continue
+            
+            if self.clear_existing:
+                for mod in list(obj.modifiers):
+                    if mod.type == 'MIRROR':
+                        obj.modifiers.remove(mod)
+            
+            if self.axis == 'AUTO':
+                auto_axis = self.get_auto_axis(obj)
+                axes_to_mirror = [auto_axis]
+            elif self.axis in ['X', 'Y', 'Z']:
+                axes_to_mirror = [self.axis]
+            else:
+                axes_to_mirror = list(self.axis)
+
+            added_any = False
+            for axis_char in axes_to_mirror:
+                use_x = axis_char == 'X'
+                use_y = axis_char == 'Y'
+                use_z = axis_char == 'Z'
+                if self.add_mirror_modifier(obj, axis_char, use_x, use_y, use_z):
+                    added_any = True
+                
+            if added_any:
+                processed_count += 1
+            
+        if processed_count == 0:
+            self.report({'INFO'}, "No new mirror modifiers added (already exist or no valid objects).")
+        else:
+            axis_text = self.axis if self.axis != 'AUTO' else f"Auto ({self.get_auto_axis(targets[0]) if targets else 'X'})"
+            self.report({'INFO'}, f"Mirror modifier ({axis_text}) added to {processed_count} object(s).")
+
+        return {'FINISHED'}
+    
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+    
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "axis")
+        layout.separator()
+
+        col = layout.column()
+        col.prop(self, "use_clip")
+        col.prop(self, "use_merge")
+
+        if self.use_merge:
+            col.prop(self, "merge_threshold")
+        col.prop(self, "use_bisect")
+        layout.separator()
+        col.prop(self, "clear_existing")

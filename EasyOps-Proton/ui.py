@@ -239,6 +239,9 @@ class EasyOpsPanel(bpy.types.Panel):
         row.operator("object.easy_sharpen_edges", text="Flat Shade", icon='MESH_DATA')
         row.operator("object.easy_smart_apply", text="Smart Apply", icon='CHECKMARK')
 
+        row = col.row(align=True)
+        row.operator("object.easy_mirror", text="Mirror", icon='MOD_MIRROR')
+
         # Active Modifiers
         if obj and obj.type == 'MESH' and obj.modifiers:
             main_col.separator(factor=0.5)
@@ -253,6 +256,8 @@ class EasyOpsPanel(bpy.types.Panel):
                     self.draw_decimate_modifier(mod_box, m)
                 elif m.type == 'REMESH':
                     self.draw_remesh_modifier(mod_box, m)
+                elif m.type == 'MIRROR':
+                    self.draw_mirror_modifier(mod_box, m)
     
     """Im doing this entire commit on a friday so i'm lazy. Will comment later"""
 
@@ -312,5 +317,24 @@ class EasyOpsPanel(bpy.types.Panel):
             col.prop(modifier, "sharpness", text="Sharpness", slider=True)
         
         col.prop(modifier, "use_remove_disconnected", text="Remove Disconnected")
+    
+    def draw_mirror_modifier(self, layout, modifier):
+        box = layout.box()
+
+        header = box.row(align=True)
+        header.prop(modifier, "show_viewport", text="", icon='RESTRICT_VIEW_OFF' if modifier.show_viewport else 'RESTRICT_VIEW_ON')
+        header.label(text=f"Mirror: {modifier.name}", icon='MOD_MIRROR')
+
+        delete_op = header.operator("object.modifier_remove", text="", icon="X")
+        delete_op.modifier = modifier.name
+
+        col = box.column(align=True)
+        col.scale_y = 0.9
+
+        row = col.row(align=True)
+        row.prop(modifier, "use_axis", text="Axis")
+        row.prop(modifier, "use_bisect_axis", text="Bisect Axis")
+
+        col.prop(modifier, "use_mirror_merge", text="Merge")  
 
 # TODO: Status and Info

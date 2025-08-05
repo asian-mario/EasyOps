@@ -519,7 +519,6 @@ class OBJECT_OT_easy_mirror(bpy.types.Operator):
         name="Mirror Axis",
         description="Axis to mirror across",
         items=[
-            ('AUTO', "Auto", "Detect axis automatically based on object bounds"),
             ('X', "X", "Mirror across X axis"),
             ('Y', "Y", "Mirror across Y axis"),     
             ('Z', "Z", "Mirror across Z axis"),
@@ -528,7 +527,7 @@ class OBJECT_OT_easy_mirror(bpy.types.Operator):
             ('YZ', "YZ", "Mirror across Y and Z axes"),
             ('XYZ', "XYZ", "Mirror across all axes"),
         ],
-        default='AUTO'
+        default='X'
     )
 
     flip_x: BoolProperty(
@@ -552,7 +551,7 @@ class OBJECT_OT_easy_mirror(bpy.types.Operator):
     use_gizmo: BoolProperty(
         name="Use Viewport Gizmo",
         description="Use the mirror gizmo for axis selection",
-        default=False
+        default=True
     )
 
     use_clip: BoolProperty(
@@ -666,10 +665,7 @@ class OBJECT_OT_easy_mirror(bpy.types.Operator):
                     if mod.type == 'MIRROR':
                         obj.modifiers.remove(mod)
             
-            if self.axis == 'AUTO':
-                auto_axis = self.get_auto_axis(obj)
-                axes_to_mirror = [auto_axis]
-            elif self.axis in ['X', 'Y', 'Z']:
+            if self.axis in ['X', 'Y', 'Z']:
                 axes_to_mirror = [self.axis]
             else:
                 axes_to_mirror = list(self.axis)
@@ -679,7 +675,11 @@ class OBJECT_OT_easy_mirror(bpy.types.Operator):
                 use_x = axis_char == 'X'
                 use_y = axis_char == 'Y'
                 use_z = axis_char == 'Z'
-                if self.add_mirror_modifier(obj, axis_char, use_x, use_y, use_z):
+
+                flip_x = use_x and self.flip_x
+                flip_y = use_y and self.flip_y
+                flip_z = use_z and self.flip_z
+                if self.add_mirror_modifier(obj, axis_char, use_x, use_y, use_z, flip_x, flip_y, flip_z):
                     added_any = True
                 
             if added_any:
@@ -688,19 +688,19 @@ class OBJECT_OT_easy_mirror(bpy.types.Operator):
         if processed_count == 0:
             self.report({'INFO'}, "No new mirror modifiers added (already exist or no valid objects).")
         else:
-            axis_text = self.axis if self.axis != 'AUTO' else f"Auto ({self.get_auto_axis(targets[0]) if targets else 'X'})"
             flip_info = []
             if self.flip_x: flip_info.append("X-flipped")
             if self.flip_y: flip_info.append("Y-flipped")
             if self.flip_z: flip_info.append("Z-flipped")
             flip_text = f" (Flipped: {', '.join(flip_info)})" if flip_info else ""
-            self.report({'INFO'}, f"Mirror modifier ({axis_text}{flip_text}) added to {processed_count} object(s).")
+            self.report({'INFO'}, f"Mirror modifier ({self.axis}{flip_text}) added to {processed_count} object(s).")
 
         return {'FINISHED'}
     
     def invoke_gizmo_mode(self, context):
         bpy.ops.object.easy_mirror_gizmo('INVOKE_DEFAULT', use_clip=self.use_clip, use_merge=self.use_merge, merge_threshold=self.merge_threshold, use_bisect=self.use_bisect, clear_existing=self.clear_existing)
-    
+        return {'RUNNING_MODAL'}
+
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self)
     
@@ -711,11 +711,11 @@ class OBJECT_OT_easy_mirror(bpy.types.Operator):
 
         if not self.use_gizmo:
             row = layout.row()
-            if 'X' in self.axis or self.axis == 'AUTO':
+            if 'X' in self.axis:
                 row.prop(self, "flip_x", toggle=True)
-            if 'Y' in self.axis or self.axis == 'AUTO':
+            if 'Y' in self.axis:
                 row.prop(self, "flip_y", toggle=True)
-            if 'Z' in self.axis or self.axis == 'AUTO':
+            if 'Z' in self.axis:
                 row.prop(self, "flip_z", toggle=True)
 
         layout.separator()
@@ -770,9 +770,8 @@ class OBJECT_OT_easy_mirror_gizmo(bpy.types.Operator):
     
     def invoke(self, context, event):
         if context.area.type == 'VIEW_3D':
-            args = (context, event)
             self._handle = bpy.types.SpaceView3D.draw_handler_add(
-                self.draw_gizmo, args, 'WINDOW', 'POST_PIXEL'
+                self.draw_gizmo, (context,), 'WINDOW', 'POST_PIXEL'
             )
             context.window_manager.modal_handler_add(self)
             self.report({'INFO'}, "Click on axis arrow to mirror. Right-click or ESC to cancel.")
@@ -788,5 +787,267 @@ class OBJECT_OT_easy_mirror_gizmo(bpy.types.Operator):
         context.area.tag_redraw()
 
     def update_hover(self, context, event):
-        pass
+        mouse_x = event.mouse_region_x
+        mouse_y = event.mouse_region_y
+
+        targets = utils.get_target_objects(context)
+        if not targets:
+            self.selected_axis = None
+            self.selected_flip = False
+            return
         
+        obj = targets[0]
+        world_pos = obj.matrix_world.translation
+
+        region = context.region
+        rv3d = context.region_data
+        screen_pos = view3d_utils.location_3d_to_region_2d(region, rv3d, world_pos)
+
+        if not screen_pos:
+            self.selected_axis = None
+            self.selected_flip = False
+            return
+        
+        arrow_length = 60
+        arrow_width = 20
+
+        def point_in_arrow(mouse_pos, start_pos, end_pos, width):
+            dx = end_pos[0] - start_pos[0]
+            dy = end_pos[1] - start_pos[1]
+            length = math.sqrt(dx*dx + dy*dy)
+            if length == 0:
+                return False
+            
+            dx /= length
+            dy /= length
+
+            mx = mouse_pos[0] - start_pos[0]
+            my = mouse_pos[1] - start_pos[1]
+
+            dot = mx * dx + my * dy
+            if dot < 0 or dot > length:
+                return False
+            
+            perp_dist = abs(mx * (-dy)  + my * dx)
+            return perp_dist < width
+        
+        mouse_pos = (mouse_x, mouse_y)
+
+        x_pos_end = (screen_pos[0] + arrow_length, screen_pos[1])
+        x_neg_end = (screen_pos[0] - arrow_length, screen_pos[1])
+        z_pos_end = (screen_pos[0], screen_pos[1] + arrow_length)
+        z_neg_end = (screen_pos[0], screen_pos[1] - arrow_length)
+        
+        y_pos_end = (screen_pos[0] + arrow_length * 0.7, screen_pos[1] + arrow_length * 0.7)
+        y_neg_end = (screen_pos[0] - arrow_length * 0.7, screen_pos[1] - arrow_length * 0.7)
+
+        # i am so sorry for this code
+        if point_in_arrow(mouse_pos, screen_pos, x_pos_end, arrow_width):
+            self.selected_axis = 'X'
+            self.selected_flip = False
+        elif point_in_arrow(mouse_pos, screen_pos, x_neg_end, arrow_width):
+            self.selected_axis = 'X'
+            self.selected_flip = True
+        elif point_in_arrow(mouse_pos, screen_pos, y_pos_end, arrow_width):
+            self.selected_axis = 'Y'
+            self.selected_flip = False
+        elif point_in_arrow(mouse_pos, screen_pos, y_neg_end, arrow_width):
+            self.selected_axis = 'Y'
+            self.selected_flip = True
+        elif point_in_arrow(mouse_pos, screen_pos, z_pos_end, arrow_width): 
+            self.selected_axis = 'Z'
+            self.selected_flip = False
+        elif point_in_arrow(mouse_pos, screen_pos, z_neg_end, arrow_width):
+            self.selected_axis = 'Z'
+            self.selected_flip = True
+        else:
+            self.selected_axis = None
+            self.selected_flip = False
+
+    def get_clicked_axis(self, context, event):
+        mouse_x = event.mouse_region_x
+        mouse_y = event.mouse_region_y
+        
+        targets = utils.get_target_objects(context)
+        if not targets:
+            return None, False
+
+        obj = targets[0]
+        world_pos = obj.matrix_world.translation
+
+        region = context.region
+        rv3d = context.region_data
+        screen_pos = view3d_utils.location_3d_to_region_2d(region, rv3d, world_pos)
+
+        if not screen_pos:
+            return None, False
+        
+        arrow_length = 60   
+        arrow_width = 20
+
+        x_pos_end = (screen_pos[0] + arrow_length, screen_pos[1])
+        x_neg_end = (screen_pos[0] - arrow_length, screen_pos[1])
+        
+        z_pos_end = (screen_pos[0], screen_pos[1] + arrow_length)
+        z_neg_end = (screen_pos[0], screen_pos[1] - arrow_length)
+        
+        y_pos_end = (screen_pos[0] + arrow_length * 0.7, screen_pos[1] + arrow_length * 0.7)
+        y_neg_end = (screen_pos[0] - arrow_length * 0.7, screen_pos[1] - arrow_length * 0.7)
+        
+        def point_in_arrow(mouse_pos, start_pos, end_pos, width):
+            dx = end_pos[0] - start_pos[0]
+            dy = end_pos[1] - start_pos[1]
+            length = math.sqrt(dx*dx + dy*dy)
+            if length == 0:
+                return False
+            
+            dx /= length
+            dy /= length
+
+            mx = mouse_pos[0] - start_pos[0]  
+            my = mouse_pos[1] - start_pos[1]
+            
+            dot = mx * dx + my * dy
+            if dot < 0 or dot > length:
+                return False
+                
+            perp_dist = abs(mx * (-dy) + my * dx)
+            return perp_dist < width
+        
+        mouse_pos = (mouse_x, mouse_y)
+        
+        if point_in_arrow(mouse_pos, screen_pos, x_pos_end, arrow_width):
+            return 'X', False
+        if point_in_arrow(mouse_pos, screen_pos, y_pos_end, arrow_width):
+            return 'Y', False  
+        if point_in_arrow(mouse_pos, screen_pos, z_pos_end, arrow_width):
+            return 'Z', False
+            
+        if point_in_arrow(mouse_pos, screen_pos, x_neg_end, arrow_width):
+            return 'X', True
+        if point_in_arrow(mouse_pos, screen_pos, y_neg_end, arrow_width):
+            return 'Y', True
+        if point_in_arrow(mouse_pos, screen_pos, z_neg_end, arrow_width):
+            return 'Z', True
+            
+        return None, False
+
+    def apply_mirror(self, context, axis, flip):
+        targets = utils.get_target_objects(context)
+        processed_count = 0
+
+        for obj in targets:
+            if obj.type != 'MESH':
+                continue
+            
+            if self.clear_existing:
+                for mod in list(obj.modifiers):
+                    if mod.type == 'MIRROR':
+                        obj.modifiers.remove(mod)
+            
+            mod_name = f"Mirror_{axis}{'_Flipped' if flip else ''}"
+            mirror_mod = obj.modifiers.new(mod_name, 'MIRROR')
+
+            use_x = axis == 'X'
+            use_y = axis == 'Y'
+            use_z = axis == 'Z'
+            mirror_mod.use_axis = (use_x, use_y, use_z)
+
+            mirror_mod.use_clip = self.use_clip
+            mirror_mod.use_bisect_axis = (
+                self.use_bisect and use_x,
+                self.use_bisect and use_y,
+                self.use_bisect and use_z
+            )
+
+            if flip:
+                if axis == 'X':
+                    empty = bpy.data.objects.new(f"Mirror_Origin{axis}", None)
+                    empty.location= obj.location.copy()
+                    empty.location.x = -empty.location.x
+                    context.collection.objects.link(empty)
+                    mirror_mod.mirror_object = empty
+                
+            if self.use_merge:
+                mirror_mod.merge_threshold = self.merge_threshold
+
+            processed_count += 1
+        
+        flip_text = " (flipped)" if flip else ""
+        self.report({'INFO'}, f"Mirror {axis}{flip_text} applied to {processed_count} object(s)")
+
+    def draw_gizmo(self, context):
+        targets = utils.get_target_objects(context)
+        if not targets:
+            return
+            
+        obj = targets[0]
+        world_pos = obj.matrix_world.translation
+        
+        region = context.region
+        rv3d = context.region_data
+        screen_pos = view3d_utils.location_3d_to_region_2d(region, rv3d, world_pos)
+        
+        if not screen_pos:
+            return
+
+        gpu.state.blend_set('ALPHA')
+
+        center_shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+        center_batch = batch_for_shader(center_shader, 'POINTS', {"pos": [(screen_pos[0], screen_pos[1])]})
+        center_shader.bind()
+        center_shader.uniform_float("color", (1.0, 1.0, 1.0, 1.0))
+        center_batch.draw(center_shader)
+
+        arrow_length = 60
+        line_width = 3
+        
+        # this stinks
+        self.draw_arrow(screen_pos, (screen_pos[0] + arrow_length, screen_pos[1]), (1.0, 0.0, 0.0, 0.8), line_width)
+        self.draw_arrow(screen_pos, (screen_pos[0] - arrow_length, screen_pos[1]), (0.8, 0.0, 0.0, 0.6), line_width)
+        self.draw_arrow(screen_pos, (screen_pos[0], screen_pos[1] + arrow_length), (0.0, 0.0, 1.0, 0.8), line_width)
+        self.draw_arrow(screen_pos, (screen_pos[0], screen_pos[1] - arrow_length), (0.0, 0.0, 0.8, 0.6), line_width)
+        self.draw_arrow(screen_pos, (screen_pos[0] + arrow_length * 0.7, screen_pos[1] + arrow_length * 0.7), (0.0, 1.0, 0.0, 0.8), line_width)
+        self.draw_arrow(screen_pos, (screen_pos[0] - arrow_length * 0.7, screen_pos[1] - arrow_length * 0.7), (0.0, 0.8, 0.0, 0.6), line_width)
+
+        self.draw_text(screen_pos[0] + arrow_length + 10, screen_pos[1], "X+", (1.0, 0.0, 0.0, 1.0))
+        self.draw_text(screen_pos[0] - arrow_length - 20, screen_pos[1], "X-", (0.8, 0.0, 0.0, 1.0))
+        self.draw_text(screen_pos[0], screen_pos[1] + arrow_length + 10, "Z+", (0.0, 0.0, 1.0, 1.0))
+        self.draw_text(screen_pos[0], screen_pos[1] - arrow_length - 20, "Z-", (0.0, 0.0, 0.8, 1.0))
+        self.draw_text(screen_pos[0] + arrow_length * 0.7 + 10, screen_pos[1] + arrow_length * 0.7, "Y+", (0.0, 1.0, 0.0, 1.0))
+        self.draw_text(screen_pos[0] - arrow_length * 0.7 - 20, screen_pos[1] - arrow_length * 0.7, "Y-", (0.0, 0.8, 0.0, 1.0))
+        
+        gpu.state.blend_set('NONE')
+    
+    def draw_arrow(self, start_pos, end_pos, color, width):
+        shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+        batch = batch_for_shader(shader, 'LINES', {"pos": [start_pos, end_pos]})
+        shader.bind()
+        shader.uniform_float("color", color)
+        gpu.state.line_width_set(width)
+        batch.draw(shader)
+
+        dx = end_pos[0] - start_pos[0]
+        dy = end_pos[1] - start_pos[1]
+        length = math.sqrt(dx*dx + dy*dy)
+        if length > 0:
+            dx /= length
+            dy /= length
+            
+            head_size = 8
+            p1 = (end_pos[0] - head_size * dx + head_size * 0.5 * dy,
+                  end_pos[1] - head_size * dy - head_size * 0.5 * dx)
+            p2 = (end_pos[0] - head_size * dx - head_size * 0.5 * dy,
+                  end_pos[1] - head_size * dy + head_size * 0.5 * dx)
+            
+            head_batch = batch_for_shader(shader, 'TRIS', 
+                                        {"pos": [end_pos, p1, p2]})
+            head_batch.draw(shader)
+    
+    def draw_text(self, x, y, text, color):
+        """Draw text at screen coordinates"""
+        font_id = 0
+        blf.position(font_id, x, y, 0)
+        blf.size(font_id, 12)
+        blf.color(font_id, *color)
+        blf.draw(font_id, text)

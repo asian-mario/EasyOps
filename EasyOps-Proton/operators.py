@@ -531,6 +531,30 @@ class OBJECT_OT_easy_mirror(bpy.types.Operator):
         default='AUTO'
     )
 
+    flip_x: BoolProperty(
+        name="Flip X Axis",
+        description="Flip the X axis when mirroring",
+        default=False
+    )
+
+    flip_y: BoolProperty(
+        name="Flip Y Axis",
+        description="Flip the Y axis when mirroring",
+        default=False
+    )
+
+    flip_z: BoolProperty(
+        name="Flip Z Axis",
+        description="Flip the Z axis when mirroring",
+        default=False
+    )
+
+    use_gizmo: BoolProperty(
+        name="Use Viewport Gizmo",
+        description="Use the mirror gizmo for axis selection",
+        default=False
+    )
+
     use_clip: BoolProperty(
         name="Use Clipping",
         description="Prevent vertices from crossing the mirror plane",
@@ -609,6 +633,15 @@ class OBJECT_OT_easy_mirror(bpy.types.Operator):
             self.use_bisect and use_z
         )
 
+        if use_x and self.flip_x:
+            mirror_mod.use_axis = (True, use_y, use_z)
+            mirror_mod.offset_u = -1.0
+        if use_y and self.flip_y:
+            mirror_mod.use_axis = (use_x, True, use_z)
+            mirror_mod.offset_v = -1.0
+        if use_z and self.flip_z:
+            mirror_mod.use_axis = (use_x, use_y, True)
+
         if self.use_merge:
             mirror_mod.merge_threshold = self.merge_threshold
         
@@ -619,6 +652,9 @@ class OBJECT_OT_easy_mirror(bpy.types.Operator):
         if not targets:
             self.report({'WARNING'}, "No mesh objects found")
             return {'CANCELLED'}
+        
+        if self.use_gizmo:
+            return self.invoke_gizmo_mode(context)
         
         processed_count = 0
         for obj in targets:
@@ -653,9 +689,17 @@ class OBJECT_OT_easy_mirror(bpy.types.Operator):
             self.report({'INFO'}, "No new mirror modifiers added (already exist or no valid objects).")
         else:
             axis_text = self.axis if self.axis != 'AUTO' else f"Auto ({self.get_auto_axis(targets[0]) if targets else 'X'})"
-            self.report({'INFO'}, f"Mirror modifier ({axis_text}) added to {processed_count} object(s).")
+            flip_info = []
+            if self.flip_x: flip_info.append("X-flipped")
+            if self.flip_y: flip_info.append("Y-flipped")
+            if self.flip_z: flip_info.append("Z-flipped")
+            flip_text = f" (Flipped: {', '.join(flip_info)})" if flip_info else ""
+            self.report({'INFO'}, f"Mirror modifier ({axis_text}{flip_text}) added to {processed_count} object(s).")
 
         return {'FINISHED'}
+    
+    def invoke_gizmo_mode(self, context):
+        bpy.ops.object.easy_mirror_gizmo('INVOKE_DEFAULT', use_clip=self.use_clip, use_merge=self.use_merge, merge_threshold=self.merge_threshold, use_bisect=self.use_bisect, clear_existing=self.clear_existing)
     
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self)
@@ -663,6 +707,17 @@ class OBJECT_OT_easy_mirror(bpy.types.Operator):
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "axis")
+        layout.prop(self, "use_gizmo")
+
+        if not self.use_gizmo:
+            row = layout.row()
+            if 'X' in self.axis or self.axis == 'AUTO':
+                row.prop(self, "flip_x", toggle=True)
+            if 'Y' in self.axis or self.axis == 'AUTO':
+                row.prop(self, "flip_y", toggle=True)
+            if 'Z' in self.axis or self.axis == 'AUTO':
+                row.prop(self, "flip_z", toggle=True)
+
         layout.separator()
 
         col = layout.column()
@@ -674,3 +729,64 @@ class OBJECT_OT_easy_mirror(bpy.types.Operator):
         col.prop(self, "use_bisect")
         layout.separator()
         col.prop(self, "clear_existing")
+
+# im working on this okay just let it be
+class OBJECT_OT_easy_mirror_gizmo(bpy.types.Operator):
+    """Mirror Gizmo Operator"""
+    bl_idname = "object.easy_mirror_gizmo"
+    bl_label = "Mirror Gizmo"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    use_clip: BoolProperty(default=True)
+    use_merge: BoolProperty(default=True)
+    merge_threshold: FloatProperty(default=0.001)
+    use_bisect: BoolProperty(default=True)
+    clear_existing: BoolProperty(default=True)
+
+    selected_axis = None
+    selected_flip = False
+    def modal(self, context, event):
+        context.area.tag_redraw()
+
+        if event.type == {'MIDDLEMOUSE', 'WHEELUPMOUSE', 'WHEELDOWNMOUSE'}:
+            return {'PASS_THROUGH'}
+        
+        if event.type == 'MOUSEMOVE':
+            self.update_hover(context, event)
+            return {'RUNNING_MODAL'}
+
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
+            axis, flip = self.get_clicked_axis(context, event)
+            if axis:
+                self.apply_mirror(context, axis, flip)
+                self.cleanup_gizmo(context)
+                return {'FINISHED'}
+        
+        if event.type in {'RIGHTMOUSE', 'ESC'}:
+            self.cleanup_gizmo(context)
+            return {'CANCELLED'}
+
+        return {'RUNNING_MODAL'}
+    
+    def invoke(self, context, event):
+        if context.area.type == 'VIEW_3D':
+            args = (context, event)
+            self._handle = bpy.types.SpaceView3D.draw_handler_add(
+                self.draw_gizmo, args, 'WINDOW', 'POST_PIXEL'
+            )
+            context.window_manager.modal_handler_add(self)
+            self.report({'INFO'}, "Click on axis arrow to mirror. Right-click or ESC to cancel.")
+            return {'RUNNING_MODAL'}
+        else:
+            self.report({'WARNING'}, "View3D not found, cannot run operator")
+            return {'CANCELLED'}
+
+    def cleanup_gizmo(self, context):
+        if hasattr(self, '_handle'):
+            bpy.types.SpaceView3D.draw_handler_remove(self._handle, 'WINDOW')
+            del self._handle
+        context.area.tag_redraw()
+
+    def update_hover(self, context, event):
+        pass
+        

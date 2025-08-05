@@ -365,12 +365,14 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
             self.cleanup(context)
             return {'CANCELLED'}
         
-        elif event.type == 'Z' and event.value == 'PRESS':
+        # STOP CRASHING
+        elif event.type == 'Z' and event.value == 'PRESS' and len(self.points) > 1:
             # Undo last point
             if self.points:
                 self.points.pop()
                 self.update_preview(context)
-                self.update_wireframe_preview(context)
+                if len(self.points) > 1:
+                    self.update_wireframe_preview(context)
             return {'RUNNING_MODAL'}
         
         elif event.type == 'B' and event.value == 'PRESS':
@@ -862,7 +864,7 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
 
         # Draw depth indicator
         if len(self.points) >= 1:
-            self.draw_depth_indicator(context) # (inf.) HELLO? THIS IS ALREADY HERE WHY ARENT YOU BEING CALLED??
+            self.draw_depth_indicator(context) 
     
     def draw_depth_indicator(self, context):
         """Draw depth value on screen"""
@@ -970,8 +972,13 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
             self.draw_handler = None
         
         if hasattr(self, 'wireframe_obj') and self.wireframe_obj:
-            bpy.data.objects.remove(self.wireframe_obj, do_unlink=True)
-            self.wireframe_obj = None
+            try:
+                if self.wireframe_obj.name in bpy.data.objects:
+                    bpy.data.objects.remove(self.wireframe_obj, do_unlink=True)
+            except (ReferenceError, AttributeError):
+                pass
+            finally:
+                self.wireframe_obj = None
 
         self.drawing = False
         self.preview_batch = None

@@ -242,7 +242,7 @@ class EasyOpsPanel(bpy.types.Panel):
         row.operator("object.easy_smart_apply", text="Smart Apply", icon='CHECKMARK')
 
         row = col.row(align=True)
-        row.operator("object.easy_mirror", text="Mirror", icon='MOD_MIRROR')
+        row.operator("object.easy_mirror_gizmo", text="Mirror", icon='MOD_MIRROR')
 
         # Active Modifiers
         if obj and obj.type == 'MESH' and obj.modifiers:

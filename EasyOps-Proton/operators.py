@@ -612,40 +612,72 @@ class OBJECT_OT_easy_mirror(bpy.types.Operator):
         return min(offsets, key=offsets.get)
 
     def add_mirror_modifier(self, obj, axis_name, use_x=False, use_y=False, use_z=False):
-        """Mirror modifier with specified settigs"""
+        """Mirror modifier with bisect + flip support (Blender 4.5)"""
         mod_name = f"Mirror_{axis_name}"
 
+        # 1. Remove existing modifier if requested
         if self.clear_existing:
             existing = obj.modifiers.get(mod_name)
             if existing:
                 obj.modifiers.remove(existing)
-        
-        if not self.clear_existing and any(m.type == 'MIRROR' and m.use_axis[0] == use_x and m_use_axis[1] == use_y and m.use_axis[2] == use_z for m in obj.modifiers):
-            return False
-        
+
+        # 2. Skip creation if an identical mirror exists (and no flips are active)
+        if not self.clear_existing:
+            for m in obj.modifiers:
+                if (
+                    m.type == 'MIRROR'
+                    and tuple(m.use_axis) == (use_x, use_y, use_z)
+                    and not (self.flip_x or self.flip_y or self.flip_z)
+                ):
+                    return False
+
+        # 3. Create & configure the mirror modifier
         mirror_mod = obj.modifiers.new(name=mod_name, type='MIRROR')
         mirror_mod.use_axis = (use_x, use_y, use_z)
         mirror_mod.use_clip = self.use_clip
+
+        # 4. Bisect plane + Flip options
         mirror_mod.use_bisect_axis = (
-            self.use_bisect and use_x, 
-            self.use_bisect and use_y, 
-            self.use_bisect and use_z
+            self.use_bisect and use_x,
+            self.use_bisect and use_y,
+            self.use_bisect and use_z,
+        )
+        mirror_mod.use_bisect_flip_axis = (
+            self.flip_x and self.use_bisect and use_x,
+            self.flip_y and self.use_bisect and use_y,
+            self.flip_z and self.use_bisect and use_z,
         )
 
+        # 5. Assign a mirror_object when flipping
         if use_x and self.flip_x:
-            mirror_mod.use_axis = (True, use_y, use_z)
-            mirror_mod.offset_u = -1.0
-        if use_y and self.flip_y:
-            mirror_mod.use_axis = (use_x, True, use_z)
-            mirror_mod.offset_v = -1.0
-        if use_z and self.flip_z:
-            mirror_mod.use_axis = (use_x, use_y, True)
+            empty = bpy.data.objects.new(f"{obj.name}_MirrorFlipX", None)
+            empty.location = obj.location.copy()
+            empty.location.x *= -1
+            bpy.context.collection.objects.link(empty)
+            mirror_mod.mirror_object = empty
 
+        if use_y and self.flip_y:
+            empty = bpy.data.objects.new(f"{obj.name}_MirrorFlipY", None)
+            empty.location = obj.location.copy()
+            empty.location.y *= -1
+            bpy.context.collection.objects.link(empty)
+            mirror_mod.mirror_object = empty
+
+        if use_z and self.flip_z:
+            empty = bpy.data.objects.new(f"{obj.name}_MirrorFlipZ", None)
+            empty.location = obj.location.copy()
+            empty.location.z *= -1
+            bpy.context.collection.objects.link(empty)
+            mirror_mod.mirror_object = empty
+
+        # 6. Merge threshold (if requested)
         if self.use_merge:
+            mirror_mod.use_mirror_merge = True
             mirror_mod.merge_threshold = self.merge_threshold
-        
+
         return True
-    
+
+        
     def execute(self, context):
         targets = utils.get_target_objects(context)
         if not targets:
@@ -939,12 +971,12 @@ class OBJECT_OT_easy_mirror_gizmo(bpy.types.Operator):
         for obj in targets:
             if obj.type != 'MESH':
                 continue
-            
+
             if self.clear_existing:
-                for mod in list(obj.modifiers):
-                    if mod.type == 'MIRROR':
-                        obj.modifiers.remove(mod)
-            
+                for m in list(obj.modifiers):
+                    if m.type == 'MIRROR':
+                        obj.modifiers.remove(m)
+
             mod_name = f"Mirror_{axis}{'_Flipped' if flip else ''}"
             mirror_mod = obj.modifiers.new(mod_name, 'MIRROR')
 
@@ -957,30 +989,35 @@ class OBJECT_OT_easy_mirror_gizmo(bpy.types.Operator):
             mirror_mod.use_bisect_axis = (
                 self.use_bisect and use_x,
                 self.use_bisect and use_y,
-                self.use_bisect and use_z
+                self.use_bisect and use_z,
+            )
+            mirror_mod.use_bisect_flip_axis = (
+                flip and self.use_bisect and use_x,
+                flip and self.use_bisect and use_y,
+                flip and self.use_bisect and use_z,
             )
 
             if flip:
-                if axis == 'X':
-                    empty = bpy.data.objects.new(f"Mirror_Origin{axis}", None)
-                    empty.location= obj.location.copy()
-                    empty.location.x = -empty.location.x
-                    context.collection.objects.link(empty)
-                    mirror_mod.mirror_object = empty
-            else:
-                if axis =='X':
-                    empty = bpy.data.objects.new(f"Mirror_Origin{axis}", None)
-                    empty.location= obj.location.copy()
-                    context.collection.objects.link(empty)
-                    mirror_mod.mirror_object = empty
-                
+                empty = bpy.data.objects.new(f"{obj.name}_Mirror{axis}", None)
+                empty.location = obj.location.copy()
+                if use_x: empty.location.x *= -1
+                if use_y: empty.location.y *= -1
+                if use_z: empty.location.z *= -1
+                context.collection.objects.link(empty)
+                mirror_mod.mirror_object = empty
+
+            # merge at plane
             if self.use_merge:
+                mirror_mod.use_mirror_merge = True
                 mirror_mod.merge_threshold = self.merge_threshold
 
             processed_count += 1
-        
-        flip_text = " (flipped)" if flip else ""
-        self.report({'INFO'}, f"Mirror {axis}{flip_text} applied to {processed_count} object(s)")
+
+        self.report(
+            {'INFO'},
+            f"Mirror {axis}{' (flipped)' if flip else ''} applied to {processed_count} object(s)"
+        )
+
 
     def draw_gizmo(self, context):
         targets = utils.get_target_objects(context)

@@ -994,8 +994,15 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
     
     def update_wireframe_preview(self, context):
         """Create or update a wireframe object showing the FF boolean"""
-        if hasattr(self, 'wireframe_obj') and self.wireframe_obj:
-            bpy.data.objects.remove(self.wireframe_obj, do_unlink=True)
+        if hasattr(self, 'wireframe_obj') and self.wireframe_obj:        
+            try:
+                if self.wireframe_obj.name in bpy.data.objects:
+                    bpy.data.objects.remove(self.wireframe_obj, do_unlink=True)
+            except (ReferenceError, AttributeError):
+                pass
+            finally:
+                self.wireframe_obj = None
+
 
         if len(self.points) < 3:
             return

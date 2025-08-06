@@ -679,7 +679,7 @@ class OBJECT_OT_easy_mirror(bpy.types.Operator):
                 flip_x = use_x and self.flip_x
                 flip_y = use_y and self.flip_y
                 flip_z = use_z and self.flip_z
-                if self.add_mirror_modifier(obj, axis_char, use_x, use_y, use_z, flip_x, flip_y, flip_z):
+                if self.add_mirror_modifier(obj, axis_char, use_x, use_y, use_z):
                     added_any = True
                 
             if added_any:
@@ -965,6 +965,12 @@ class OBJECT_OT_easy_mirror_gizmo(bpy.types.Operator):
                     empty = bpy.data.objects.new(f"Mirror_Origin{axis}", None)
                     empty.location= obj.location.copy()
                     empty.location.x = -empty.location.x
+                    context.collection.objects.link(empty)
+                    mirror_mod.mirror_object = empty
+            else:
+                if axis =='X':
+                    empty = bpy.data.objects.new(f"Mirror_Origin{axis}", None)
+                    empty.location= obj.location.copy()
                     context.collection.objects.link(empty)
                     mirror_mod.mirror_object = empty
                 

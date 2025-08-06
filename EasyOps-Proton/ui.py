@@ -14,7 +14,7 @@ class OBJECT_MT_easy_radial_menu(bpy.types.Menu):
             pie.operator("object.easy_ssharpen",     icon='MOD_SHRINKWRAP')
             pie.operator("object.easy_smart_apply",       icon='CHECKMARK')
             ff_op = pie.operator("object.easy_freeform_boolean", text="FreeForm", icon='GREASEPENCIL')
-            pie.operator("object.easy_smart_uv_unwrap",   icon='UV') 
+            pie.operator("object.easy_mirror_gizmo",          icon='MOD_MIRROR')
             pie.operator("object.easy_clean_geometry",    icon='BRUSH_DATA')
             pie.operator("object.easy_shade_smooth",    icon='SURFACE_NSURFACE')
             pie.operator("object.assign_random_materials",icon='MATERIAL')
@@ -27,6 +27,8 @@ class OBJECT_MT_easy_radial_menu(bpy.types.Menu):
             pie.operator("object.easy_boolean_intersect", icon='SELECT_INTERSECT')
             pie.operator("object.easy_boolean_slice", icon='MOD_BOOLEAN')
             pie.operator("object.easy_smart_uv_unwrap",   icon='UV')
+            pie.operator("object.easy_clean_geometry",    icon='BRUSH_DATA')
+
             ff_op = pie.operator("object.easy_freeform_boolean", text="FreeForm Diff", icon='SELECT_SUBTRACT')
             ff_op.operation = 'DIFFERENCE'
 

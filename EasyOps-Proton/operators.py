@@ -833,68 +833,90 @@ class OBJECT_OT_easy_mirror_gizmo(bpy.types.Operator):
 
         region = context.region
         rv3d = context.region_data
-        screen_pos = view3d_utils.location_3d_to_region_2d(region, rv3d, world_pos)
 
-        if not screen_pos:
+        gizmo_world_size = self.calculate_gizmo_world_size(context, world_pos)
+
+        arrow_endpoints = self.calculate_arrow_endpoints_world(obj, gizmo_world_size)
+        screen_endpoints = {}
+
+        center_screen = view3d_utils.location_3d_to_region_2d(region, rv3d, world_pos)
+
+        if not center_screen:
             self.selected_axis = None
             self.selected_flip = False
             return
-        
-        arrow_length = 60
+
+        for axis_dir, world_end in arrow_endpoints.items():
+            screen_end = view3d_utils.location_3d_to_region_2d(region, rv3d, world_end)
+            if screen_end:
+                screen_endpoints[axis_dir] = screen_end
+
+        mouse_pos = (mouse_x, mouse_y)
         arrow_width = 20
 
-        def point_in_arrow(mouse_pos, start_pos, end_pos, width):
-            dx = end_pos[0] - start_pos[0]
-            dy = end_pos[1] - start_pos[1]
-            length = math.sqrt(dx*dx + dy*dy)
-            if length == 0:
-                return False
-            
-            dx /= length
-            dy /= length
-
-            mx = mouse_pos[0] - start_pos[0]
-            my = mouse_pos[1] - start_pos[1]
-
-            dot = mx * dx + my * dy
-            if dot < 0 or dot > length:
-                return False
-            
-            perp_dist = abs(mx * (-dy)  + my * dx)
-            return perp_dist < width
+        for axis_dir, screen_end in screen_endpoints.items():
+            if self.point_in_arrow(mouse_pos, center_screen, screen_end, arrow_width):
+                if axis_dir.endswith('_pos'):
+                    self.selected_axis = axis_dir[0]
+                    self.selected_flip = False
+                else:
+                    self.selected_axis = axis_dir[0]
+                    self.selected_flip = True
         
-        mouse_pos = (mouse_x, mouse_y)
+        self.selected_axis = None
+        self.selected_flip = False
+    
+    def calculate_gizmo_world_size(self, context, world_pos):
+        rv3d = context.region_data
 
-        x_pos_end = (screen_pos[0] + arrow_length, screen_pos[1])
-        x_neg_end = (screen_pos[0] - arrow_length, screen_pos[1])
-        z_pos_end = (screen_pos[0], screen_pos[1] + arrow_length)
-        z_neg_end = (screen_pos[0], screen_pos[1] - arrow_length)
-        
-        y_pos_end = (screen_pos[0] + arrow_length * 0.7, screen_pos[1] + arrow_length * 0.7)
-        y_neg_end = (screen_pos[0] - arrow_length * 0.7, screen_pos[1] - arrow_length * 0.7)
-
-        # i am so sorry for this code
-        if point_in_arrow(mouse_pos, screen_pos, x_pos_end, arrow_width):
-            self.selected_axis = 'X'
-            self.selected_flip = False
-        elif point_in_arrow(mouse_pos, screen_pos, x_neg_end, arrow_width):
-            self.selected_axis = 'X'
-            self.selected_flip = True
-        elif point_in_arrow(mouse_pos, screen_pos, y_pos_end, arrow_width):
-            self.selected_axis = 'Y'
-            self.selected_flip = False
-        elif point_in_arrow(mouse_pos, screen_pos, y_neg_end, arrow_width):
-            self.selected_axis = 'Y'
-            self.selected_flip = True
-        elif point_in_arrow(mouse_pos, screen_pos, z_pos_end, arrow_width): 
-            self.selected_axis = 'Z'
-            self.selected_flip = False
-        elif point_in_arrow(mouse_pos, screen_pos, z_neg_end, arrow_width):
-            self.selected_axis = 'Z'
-            self.selected_flip = True
+        if rv3d.view_perspective == 'ORTHO':
+            return rv3d.view_distance * 0.3
         else:
-            self.selected_axis = None
-            self.selected_flip = False
+            view_matrix = rv3d.view_matrix
+            camera_pos = view_matrix.inverted().translation
+            distance = (world_pos - camera_pos).length
+            
+            return distance * 0.3
+
+    def calculate_arrow_endpoints_world(self, obj, gizmo_size):
+        world_pos = obj.matrix_world.translation
+
+        obj_matrix = obj.matrix_world.to_3x3().normalized()
+        local_x = obj_matrix @ Vector((1, 0, 0))
+        local_y = obj_matrix @ Vector((0, 1, 0))
+        local_z = obj_matrix @ Vector((0, 0, 1))
+
+        endpoints = {
+            'X_pos': world_pos + local_x * gizmo_size,
+            'X_neg': world_pos - local_x * gizmo_size,
+            'Y_pos': world_pos + local_y * gizmo_size,
+            'Y_neg': world_pos - local_y * gizmo_size,
+            'Z_pos': world_pos + local_z * gizmo_size,
+            'Z_neg': world_pos - local_z * gizmo_size,
+        }
+
+        return endpoints
+    
+    def point_in_arrow(self, mouse_pos, start_pos, end_pos, width):
+        dx = end_pos[0] - start_pos[0]
+        dy = end_pos[1] - start_pos[1]
+        length = math.sqrt(dx*dx + dy*dy)
+        if length == 0:
+            return False
+
+        dx /= length
+        dy /= length
+
+        mx = mouse_pos[0] - start_pos[0]
+        my = mouse_pos[1] - start_pos[1]
+
+        dot = mx * dx + my * dy
+        if dot < 0 or dot > length:
+            return False
+
+        perp_dist = abs(mx * (-dy) + my * dx)
+        return perp_dist < width
+
 
     def get_clicked_axis(self, context, event):
         mouse_x = event.mouse_region_x
@@ -909,59 +931,23 @@ class OBJECT_OT_easy_mirror_gizmo(bpy.types.Operator):
 
         region = context.region
         rv3d = context.region_data
-        screen_pos = view3d_utils.location_3d_to_region_2d(region, rv3d, world_pos)
 
-        if not screen_pos:
+        gizmo_world_size = self.calculate_gizmo_world_size(context, world_pos)
+        arrow_endpoints = self.calculate_arrow_endpoints_world(obj, gizmo_world_size)
+        center_screen = view3d_utils.location_3d_to_region_2d(region, rv3d, world_pos)
+        if not center_screen: 
             return None, False
-        
-        arrow_length = 60   
+
+        mouse_pos = (mouse_x, mouse_y)
         arrow_width = 20
 
-        x_pos_end = (screen_pos[0] + arrow_length, screen_pos[1])
-        x_neg_end = (screen_pos[0] - arrow_length, screen_pos[1])
+        for axis_dir, world_end in arrow_endpoints.items():
+            screen_end = view3d_utils.location_3d_to_region_2d(region, rv3d, world_end)
+            if screen_end and self.point_in_arrow(mouse_pos, center_screen, screen_end, arrow_width):
+                axis = axis_dir[0]
+                flip = axis_dir.endswith('_neg')
+                return axis, flip
         
-        z_pos_end = (screen_pos[0], screen_pos[1] + arrow_length)
-        z_neg_end = (screen_pos[0], screen_pos[1] - arrow_length)
-        
-        y_pos_end = (screen_pos[0] + arrow_length * 0.7, screen_pos[1] + arrow_length * 0.7)
-        y_neg_end = (screen_pos[0] - arrow_length * 0.7, screen_pos[1] - arrow_length * 0.7)
-        
-        def point_in_arrow(mouse_pos, start_pos, end_pos, width):
-            dx = end_pos[0] - start_pos[0]
-            dy = end_pos[1] - start_pos[1]
-            length = math.sqrt(dx*dx + dy*dy)
-            if length == 0:
-                return False
-            
-            dx /= length
-            dy /= length
-
-            mx = mouse_pos[0] - start_pos[0]  
-            my = mouse_pos[1] - start_pos[1]
-            
-            dot = mx * dx + my * dy
-            if dot < 0 or dot > length:
-                return False
-                
-            perp_dist = abs(mx * (-dy) + my * dx)
-            return perp_dist < width
-        
-        mouse_pos = (mouse_x, mouse_y)
-        
-        if point_in_arrow(mouse_pos, screen_pos, x_pos_end, arrow_width):
-            return 'X', False
-        if point_in_arrow(mouse_pos, screen_pos, y_pos_end, arrow_width):
-            return 'Y', False  
-        if point_in_arrow(mouse_pos, screen_pos, z_pos_end, arrow_width):
-            return 'Z', False
-            
-        if point_in_arrow(mouse_pos, screen_pos, x_neg_end, arrow_width):
-            return 'X', True
-        if point_in_arrow(mouse_pos, screen_pos, y_neg_end, arrow_width):
-            return 'Y', True
-        if point_in_arrow(mouse_pos, screen_pos, z_neg_end, arrow_width):
-            return 'Z', True
-            
         return None, False
 
     def apply_mirror(self, context, axis, flip):
@@ -1023,44 +1009,59 @@ class OBJECT_OT_easy_mirror_gizmo(bpy.types.Operator):
         targets = utils.get_target_objects(context)
         if not targets:
             return
-            
+
+        gpu.state.depth_test_set('NONE')
+        
         obj = targets[0]
         world_pos = obj.matrix_world.translation
         
         region = context.region
         rv3d = context.region_data
-        screen_pos = view3d_utils.location_3d_to_region_2d(region, rv3d, world_pos)
+        center_screen = view3d_utils.location_3d_to_region_2d(region, rv3d, world_pos)
         
-        if not screen_pos:
+        if not center_screen:
             return
 
         gpu.state.blend_set('ALPHA')
 
         center_shader = gpu.shader.from_builtin('UNIFORM_COLOR')
-        center_batch = batch_for_shader(center_shader, 'POINTS', {"pos": [(screen_pos[0], screen_pos[1])]})
+        center_batch = batch_for_shader(center_shader, 'POINTS', {"pos": [(center_screen[0], center_screen[1])]})
         center_shader.bind()
         center_shader.uniform_float("color", (1.0, 1.0, 1.0, 1.0))
         center_batch.draw(center_shader)
 
-        arrow_length = 60
+        gizmo_world_size = self.calculate_gizmo_world_size(context, world_pos)
+        arrow_endpoints = self.calculate_arrow_endpoints_world(obj, gizmo_world_size)
         line_width = 3
         
-        # this stinks
-        self.draw_arrow(screen_pos, (screen_pos[0] + arrow_length, screen_pos[1]), (1.0, 0.0, 0.0, 0.8), line_width)
-        self.draw_arrow(screen_pos, (screen_pos[0] - arrow_length, screen_pos[1]), (0.8, 0.0, 0.0, 0.6), line_width)
-        self.draw_arrow(screen_pos, (screen_pos[0], screen_pos[1] + arrow_length), (0.0, 0.0, 1.0, 0.8), line_width)
-        self.draw_arrow(screen_pos, (screen_pos[0], screen_pos[1] - arrow_length), (0.0, 0.0, 0.8, 0.6), line_width)
-        self.draw_arrow(screen_pos, (screen_pos[0] + arrow_length * 0.7, screen_pos[1] + arrow_length * 0.7), (0.0, 1.0, 0.0, 0.8), line_width)
-        self.draw_arrow(screen_pos, (screen_pos[0] - arrow_length * 0.7, screen_pos[1] - arrow_length * 0.7), (0.0, 0.8, 0.0, 0.6), line_width)
+        axis_config = {
+            'X_pos': {'color': (1.0, 0.0, 0.0, 0.8), 'label': 'X+', 'offset': (10, 0)},
+            'X_neg': {'color': (0.8, 0.0, 0.0, 0.6), 'label': 'X-', 'offset': (-20, 0)},
+            'Y_pos': {'color': (0.0, 1.0, 0.0, 0.8), 'label': 'Y+', 'offset': (10, 10)},
+            'Y_neg': {'color': (0.0, 0.8, 0.0, 0.6), 'label': 'Y-', 'offset': (-20, -20)},
+            'Z_pos': {'color': (0.0, 0.0, 1.0, 0.8), 'label': 'Z+', 'offset': (0, 10)},
+            'Z_neg': {'color': (0.0, 0.0, 0.8, 0.6), 'label': 'Z-', 'offset': (0, -20)},
+        }
 
-        self.draw_text(screen_pos[0] + arrow_length + 10, screen_pos[1], "X+", (1.0, 0.0, 0.0, 1.0))
-        self.draw_text(screen_pos[0] - arrow_length - 20, screen_pos[1], "X-", (0.8, 0.0, 0.0, 1.0))
-        self.draw_text(screen_pos[0], screen_pos[1] + arrow_length + 10, "Z+", (0.0, 0.0, 1.0, 1.0))
-        self.draw_text(screen_pos[0], screen_pos[1] - arrow_length - 20, "Z-", (0.0, 0.0, 0.8, 1.0))
-        self.draw_text(screen_pos[0] + arrow_length * 0.7 + 10, screen_pos[1] + arrow_length * 0.7, "Y+", (0.0, 1.0, 0.0, 1.0))
-        self.draw_text(screen_pos[0] - arrow_length * 0.7 - 20, screen_pos[1] - arrow_length * 0.7, "Y-", (0.0, 0.8, 0.0, 1.0))
-        
+        for axis_dir, world_end in arrow_endpoints.items():
+            screen_end = view3d_utils.location_3d_to_region_2d(region, rv3d, world_end)
+            if screen_end:
+                config = axis_config[axis_dir]
+
+                color = config['color']
+                if self.selected_axis and axis_dir.startswith(self.selected_axis):
+                    if (axis_dir.endswith('_pos') and not self.selected_flip) or \
+                        (axis_dir.endswith('_neg') and self.selected_flip):
+                        color = (color[0], color[1], color[2], 1.0)
+                
+                self.draw_arrow(center_screen, screen_end, color, line_width)
+
+                label_x = screen_end[0] + config['offset'][0]
+                label_y = screen_end[1] + config['offset'][1]
+                self.draw_text(label_x, label_y, config['label'], color)
+
         gpu.state.blend_set('NONE')
+        gpu.state.depth_test_set('LESS_EQUAL')
     
     def draw_arrow(self, start_pos, end_pos, color, width):
         shader = gpu.shader.from_builtin('UNIFORM_COLOR')

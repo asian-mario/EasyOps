@@ -209,20 +209,33 @@ class EasyOpsPanel(bpy.types.Panel):
 
         ff_col.separator(factor=0.3)
 
-        # Template Booleans
-        tb_col = ff_box.column(align=True)
-        tb_col.scale_y = 1.0
+        sb_col = ff_box.column(align=True)
+        sb_col.scale_y = 1.0
 
-        tb_row = tb_col.row(align=True)
-        op = tb_row.operator("object.easy_rectangle_boolean", text="◰-", icon='SELECT_SUBTRACT')
+        sb_row = sb_col.row(align=True)
+        op = sb_row.operator("object.easy_rectangle_boolean", text="◰-", icon='SELECT_SUBTRACT')
         op.operation = 'DIFFERENCE'
-        op = tb_row.operator("object.easy_rectangle_boolean", text="◰+", icon='SELECT_EXTEND')
+        op = sb_row.operator("object.easy_rectangle_boolean", text="◰+", icon='SELECT_EXTEND')
         op.operation = 'UNION'
-        op = tb_row.operator("object.easy_rectangle_boolean", text="◰∩", icon='SELECT_INTERSECT')
+        op = sb_row.operator("object.easy_rectangle_boolean", text="◰∩", icon='SELECT_INTERSECT')
         op.operation = 'INTERSECT'
-        op = tb_row.operator("object.easy_rectangle_boolean", text="◰/", icon='MOD_BOOLEAN')
+        op = sb_row.operator("object.easy_rectangle_boolean", text="◰/", icon='MOD_BOOLEAN')
         op.operation = 'SLICE'
     
+        ff_col.separator(factor=0.3)
+
+        cb_col = ff_box.column(align=True)
+        cb_col.scale_y = 1.0
+
+        cb_row = cb_col.row(align=True)
+        op = cb_row.operator("object.easy_cylinder_boolean", text="◕-", icon='SELECT_SUBTRACT')
+        op.operation = 'DIFFERENCE'
+        op = cb_row.operator("object.easy_cylinder_boolean", text="◕+", icon='SELECT_EXTEND')
+        op.operation = 'UNION'
+        op = cb_row.operator("object.easy_cylinder_boolean", text="◕", icon='SELECT_INTERSECT')
+        op.operation = 'INTERSECT'
+        op = cb_row.operator("object.easy_cylinder_boolean", text="◕/", icon='MOD_BOOLEAN')
+        op.operation = 'SLICE'
 
         # Modelling Tools
         main_col.separator(factor=0.5)

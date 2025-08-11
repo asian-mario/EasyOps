@@ -1066,7 +1066,6 @@ class OBJECT_OT_easy_freeform_boolean(OBJECT_OT_easy_free_boolean_base):
     
 
 # Next plan is to integrate these 'drawing templates' such as Squares or Circles, hopefully we can inherity the FF Boolean class and just use some of their helper functions
-# This bug is BUGGING me -> Why does this make the Freeform boolean class unregister?? What going on
 class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_free_boolean_base):
     """Draw rectangles/squares with a drag to re-size controls"""
     bl_idname = "object.easy_rectangle_boolean"
@@ -1480,3 +1479,314 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_free_boolean_base):
         if utils.is_surface_drawing_enabled(context) and hasattr(self, 'start_point') and self.start_point:
             return True
         return False
+
+class OBJECT_OT_easy_cylinder_boolean(OBJECT_OT_easy_free_boolean_base):
+    """Draw cylinder template"""
+    bl_idname = "object.easy_cylinder_boolean"
+    bl_label = "Cylinder Boolean"
+    bl_options = {'REGISTER', 'UNDO', 'BLOCKING'}
+    
+    segments: bpy.props.IntProperty(
+        name="Segments",
+        description="Number of cylinder segments",
+        default=32,
+        min=6,
+        max=64,
+    )
+
+    def invoke(self, context, event):
+        self.center_point = None
+        self.current_radius = 0.1
+        self.defining_radius = False
+        self.radius_defined = False
+        self.cylinder_defined = False
+
+        result = super().invoke(context, event)
+        if result == {'RUNNING_MODAL'}:
+            self.report({'INFO'}, f"Cylinder Boolean ({self.operation}) - LMB: Set center, Drag: Define radius, RMB: Adjust depth, Enter: Finish, Esc: Cancel")
+        
+        return result
+    
+    def modal(self, context, event):
+        context.area.tag_redraw()
+
+        if not self.cylinder_defined:
+            return self.handle_cylinder_input(context, event)
+        else:
+            return super().modal(context, event)
+    
+    def handle_cylinder_input(self, context, event):
+        self.mouse_pos = Vector((event.mouse_region_x, event.mouse_region_y))
+        self.shift_held = event.shift
+
+        if event.type == 'C' and event.value == 'PRESS':
+            self.camera_navigation = not self.camera_navigation
+            mode_text = "Camera Navigation" if self.camera_navigation else "Drawing Mode"
+            self.update_preview(context)
+            self.update_wireframe_preview(context)
+            self.report({'INFO'}, f"Switched to {mode_text} mode")
+            return {'RUNNING_MODAL'}
+        
+        if self.camera_navigation:
+            return {'PASS_THROUGH'}
+
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
+            if not self.center_point:
+                self.set_cylinder_center(context, event)
+                return {'RUNNING_MODAL'}
+            elif not self.defining_radius:
+                self.start_radius_definition(context, event)
+                return {'RUNNING_MODAL'}
+        elif event.type == 'MOUSEMOVE':
+            if self.defining_radius:
+                self.update_cylinder_radius(context, event)
+                return {'RUNNING_MODAL'}
+        elif event.type == 'LEFTMOUSE' and event.value == 'RELEASE':
+            if self.defining_radius:
+                self.finish_cylinder_definition(context, event)
+                return {'RUNNING_MODAL'}
+            
+        elif event.type == 'WHEELUPMOUSE' and not self.radius_defined:
+            self.segments = min(64, self.segments + 2)
+            self.report({'INFO'}, f"Segments: {self.segments}")
+            if self.center_point:
+                self.generate_cylinder_points()
+                self.update_preview(context)
+                self.update_wireframe_preview(context)
+            return {'RUNNING_MODAL'}
+
+        elif event.type == 'WHEELUPMOUSE' and not self.radius_defined:
+            self.segments = max(6, self.segments - 2)
+            self.report({'INFO'}, f"Segments: {self.segments}")
+            if self.center_point:
+                self.generate_cylinder_points()
+                self.update_preview(context)
+                self.update_wireframe_preview(context)
+            return {'RUNNING_MODAL'}
+
+        elif event.type == 'TAB' and event.value == 'PRESS':
+            operations = ['DIFFERENCE', 'UNION', 'INTERSECT', 'SLICE']
+            current_index = operations.index(self.operation)
+            next_index = (current_index + 1) % len(operations)
+            self.operation = operations[next_index]
+            self.report({'INFO'}, f"Boolean operation: {self.operation}")
+            return {'RUNNING_MODAL'}
+
+        elif event.type in {'ESC'}:
+            self.cleanup(context)
+            return {'CANCELLED'}
+        
+        return {'RUNNING_MODAL'}
+    
+    def set_cylinder_center(self, context, event):
+        self.center_point = self.mouse_to_world_point(context, event)
+        if self.center_point:
+            self.report({'INFO'}, "Center set. LMB+Drag to define radius")
+
+    def start_radius_definition(self, context, event):
+        self.defining_radius = True
+        self.update_cylinder_radius(context, event)
+
+    def update_cylinder_radius(self, context, event):
+        if not self.center_point:
+            return
+        
+        current_pos = self.mouse_to_world_point(context, event)
+        if current_pos:
+            radius_vector = current_pos - self.center_point
+            plane_normal = self.drawing_plane_normal.normalized()
+            radius_vector = radius_vector - radius_vector.dot(plane_normal) * plane_normal
+            self.current_radius = max(0.01, radius_vector.length)
+
+            if self.grid_snap and not self.shift_held:
+                grid_size = self.get_grid_size(context)
+                self.current_radius = round(self.current_radius / grid_size) * grid_size
+                self.current_radius = max(0.01, self.current_radius)
+            
+            self.generate_cylinder_points()
+            self.update_preview(context)
+            self.update_wireframe_preview(context)
+        
+    def finish_cylinder_definition(self, context, event):
+        self.defining_radius = False
+        self.radius_defined = True
+        self.cylinder_defined = True
+
+        self.generate_cylinder_points()
+        self.update_preview(context)
+        self.update_wireframe_preview(context)
+        
+        self.report({'INFO'}, f"Cylinder defined (R: {self.current_radius:.3f}). RMB: Adjust depth, Enter: Finish")
+    
+    def generate_cylinder_points(self):
+        if not self.center_point:
+            return
+        
+        self.points = []
+
+        plane_normal = self.drawing_plane_normal.normalized()
+        world_up = Vector((0, 0, 1))
+        if abs(plane_normal.dot(world_up)) > 0.9:
+            world_up = Vector((1, 0, 0))
+        
+        local_x = plane_normal.cross(world_up).normalized()
+        local_y = local_x.cross(plane_normal).normalized()
+
+        for i in range(self.segments):
+            angle = 2.0 * math.pi * i / self.segments
+            x_offset = self.current_radius * math.cos(angle)
+            y_offset = self.current_radius * math.sin(angle)
+
+            point = self.center_point + local_x * x_offset + local_y * y_offset
+            self.points.append(point)
+    
+    def mouse_to_world_point(self, context, event):
+        if utils.is_surface_drawing_enabled(context):
+            surface_point, surface_normal = self.get_surface_point_and_normal(context, event)
+        
+            if surface_point and surface_normal:
+                self.setup_surface_drawing_plane(context, surface_point, surface_normal)
+                return surface_point
+            else:
+                return self.get_plane_intersection_point(context, event)
+        else:
+            return self.get_plane_intersection_point(context, event)
+    
+    def draw_2d_overlay(self, context):
+        if not self.center_point and not self.defining_radius:
+            self.draw_depth_indicator(context)
+            return
+        
+        self.draw_depth_indicator(context)
+        region = context.region
+        rv3d = context.region_data
+
+        if self.operation == 'DIFFERENCE':
+            line_color = (1.0, 0.4, 0.4, 0.8)
+            fill_color = (1.0, 0.4, 0.4, 0.2)
+        elif self.operation == 'UNION':
+            line_color = (0.4, 1.0, 0.4, 0.8)
+            fill_color = (0.4, 1.0, 0.4, 0.2)
+        elif self.operation == 'INTERSECT':
+            line_color = (0.4, 0.4, 1.0, 0.8)
+            fill_color = (0.4, 0.4, 1.0, 0.2)
+        else:
+            line_color = (1.0, 0.6, 0.0, 0.8)
+            fill_color = (1.0, 0.6, 0.0, 0.2)
+
+        shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+
+        center_screen = view3d_utils.location_3d_to_region_2d(region, rv3d, self.center_point)
+        if center_screen:
+            self.draw_circle(center_screen, 6, (1.0, 1.0, 0,0, 1.0))
+
+        if len(self.points) >= 3:
+            screen_points = []
+            for point in self.points:
+                screen_coord = view3d_utils.location_3d_to_region_2d(region, rv3d, point)
+                if screen_coord:
+                    screen_points.append(screen_coord)
+            
+            if len(screen_points) >= 3:
+                try:
+                    fill_coords = []
+                    if center_screen:
+                        for i in range(len(screen_points)):
+                            next_i = (i + 1) & len(screen_points)
+                            fill_coords.extend([
+                                center_screen,
+                                screen_points[i],
+                                screen_points[next_i]
+                            ])
+                        
+                        fill_batch = batch_for_shader(shader, 'TRIS', {"pos": fill_coords})
+                        shader.bind()
+                        shader.uniform_float("color", fill_color)
+                        fill_batch.draw(shader)
+                except Exception as e:
+                    print(f"Error drawing cylinder fill: {e}")
+                
+                line_coords = []
+                for i in range(len(screen_points)):
+                    next_i = (i + 1) % len(screen_points)
+                    line_coords.extend([screen_points[i], screen_points[next_i]])
+
+                line_batch = batch_for_shader(shader, 'LINES', {"pos": line_coords})
+                shader.bind()
+                shader.uniform_float("color", line_color)
+                line_batch.draw(shader)
+
+                for screen_point in screen_points[::4]:
+                    self.draw_circle(self.mouse_pos, 3, (1.0, 1.0, 1.0, 0.8))
+                
+            elif self.defining_radius and center_screen:
+                line_coords = [center_screen, self.mouse_pos]
+                line_batch = batch_for_shader(shader, 'LINES', {"pos": line_coords})
+                shader.bind()
+                shader.uniform_float("color", line_color)
+                line_batch.draw(shader)
+
+            if not self.cylinder_defined:
+                cursor_color = (0.0, 1.0, 0.0, 0.8) if not self.defining_radius else (1.0, 1.0, 0.0, 0.8)
+                self.draw_circle(self.mouse_pos, 3, cursor_color)
+    
+    def draw_depth_indicator(self, context):
+        font_id = 0
+        blf.size(font_id, 20)
+        
+        blf.position(font_id, 50, 50, 0)
+        blf.color(font_id, 1, 1, 1, 1)
+        depth_text = f"Depth: {self.current_depth:.3f}"
+        if self.adjusting_depth:
+            depth_text += " (adjusting)"
+        blf.draw(font_id, depth_text)
+        
+        blf.position(font_id, 50, 80, 0)
+        op_color = {
+            'DIFFERENCE': (1.0, 0.4, 0.4, 1.0),
+            'UNION': (0.4, 1.0, 0.4, 1.0),
+            'INTERSECT': (0.4, 0.4, 1.0, 1.0),
+            'SLICE': (0.8, 0.6, 0.0, 1.0)
+        }
+        color = op_color.get(self.operation, (1, 1, 1, 1))
+        blf.color(font_id, *color)
+        blf.draw(font_id, f"Operation: {self.operation}")
+        
+        blf.position(font_id, 50, 110, 0)
+        blf.color(font_id, 0.8, 0.8, 1.0, 1)
+        if self.center_point:
+            blf.draw(font_id, f"Radius: {self.current_radius:.3f}")
+        
+        blf.position(font_id, 50, 140, 0)
+        blf.color(font_id, 0.8, 1.0, 0.8, 1)
+        blf.draw(font_id, f"Segments: {self.segments}")
+        blf.position(font_id, 50, 170, 0)
+        blf.color(font_id, 0.8, 0.8, 0.8, 1)
+        blf.size(font_id, 12)
+        
+        if not self.cylinder_defined:
+            controls = [
+                "LMB: Set center" if not self.center_point else "LMB+Drag: Define radius",
+                "Wheel: Change segments",
+                "Tab: Change operation",
+                "C: Camera/Drawing mode",
+                "Shift: (Hold) Turn off grid snap",
+                "Esc: Cancel"
+            ]
+        else:
+            controls = [
+                "RMB: Adjust depth",
+                "Wheel: Change depth",
+                "Tab: Change operation",
+                "B: Toggle both directions",
+                "Enter: Finish",
+                "Esc: Cancel"
+            ]
+        
+        for i, control in enumerate(controls):
+            blf.position(font_id, 50, 170 + i * 15, 0)
+            blf.draw(font_id, control)
+        
+        
+            
+            

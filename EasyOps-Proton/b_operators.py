@@ -536,7 +536,7 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
                 # Create batch for preview without indices (simple triangulation)
                 self.preview_shader = gpu.shader.from_builtin('UNIFORM_COLOR')
                 self.preview_batch = batch_for_shader(
-                    self.preview_shader, 'TRIANGLES', 
+                    self.preview_shader, 'TRIS', 
                     {"pos": vertices}
                 )
                 print("Debug: Batch created successfully")
@@ -801,8 +801,23 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
             line_color = (1.0, 0.4, 0.4, 0.8)  # Red
         elif self.operation == 'UNION':
             line_color = (0.4, 1.0, 0.4, 0.8)  # Green
-        else:  # INTERSECT
+        elif self.operation == 'INTERSECT':
             line_color = (0.4, 0.4, 1.0, 0.8)  # Blue
+        else:
+            line_color = (1.0, 0.6, 0.0, 0.8) 
+
+        if self.operation == 'DIFFERENCE':
+            line_color = (1.0, 0.4, 0.4, 0.8)  
+            fill_color = (1.0, 0.4, 0.4, 0.2)  
+        elif self.operation == 'UNION':
+            line_color = (0.4, 1.0, 0.4, 0.8)  
+            fill_color = (0.4, 1.0, 0.4, 0.2) 
+        elif self.operation == 'INTERSECT':  
+            line_color = (0.4, 0.4, 1.0, 0.8)  
+            fill_color = (0.4, 0.4, 1.0, 0.2)  
+        else:
+            line_color = (1.0, 0.6, 0.0, 0.8) 
+            fill_color = (1.0, 0.6, 0.0, 0.2)  
 
         if len(screen_points) >= 3:
             try:
@@ -815,7 +830,7 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
                     ])
 
                 if fill_coords:
-                    fill_batch = batch_for_shader(shader, 'TRIANGLES', {"pos": fill_coords})
+                    fill_batch = batch_for_shader(shader, 'TRIS', {"pos": fill_coords})
                     shader.bind()
                     shader.uniform_float("color", fill_color)
                     fill_batch.draw(shader)
@@ -885,7 +900,8 @@ class OBJECT_OT_easy_free_boolean_base(bpy.types.Operator):
         op_color = {
             'DIFFERENCE': (1.0, 0.4, 0.4, 1.0),
             'UNION': (0.4, 1.0, 0.4, 1.0),
-            'INTERSECT': (0.4, 0.4, 1.0, 1.0)
+            'INTERSECT': (0.4, 0.4, 1.0, 1.0),
+            'SLICE': (0.8, 0.6, 0.0, 1.0) 
         }
         color = op_color.get(self.operation, (1, 1, 1, 1))
         blf.color(font_id, *color)
@@ -1264,7 +1280,7 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_free_boolean_base):
                         screen_points[0], screen_points[2], screen_points[3]
                     ]
 
-                    fill_batch = batch_for_shader(shader, 'TRIANGLES', {"pos": fill_coords})
+                    fill_batch = batch_for_shader(shader, 'TRIS', {"pos": fill_coords})
                     shader.bind()
                     shader.uniform_float("color", fill_color)
                     fill_batch.draw(shader)

@@ -79,6 +79,21 @@ class EasyUtilsPanel(bpy.types.Panel):
         row.operator("object.easy_ssharpen", text="SSharpen", icon='MOD_SMOOTH')
         row.operator("object.easy_shade_smooth", text="Smooth", icon='SURFACE_NSURFACE')
 
+        main_col.separator(factor=0.5)
+        box = main_col.box()
+        header=box.row(align=True)
+        header.label(text="Edge Wear", icon='MOD_DISPLACE')
+        
+        col = box.column(align=True)
+        col.scale_y = 1.0
+
+        col.operator("object.easy_edge_wear", text="Generate Edge Wear", icon='MOD_DISPLACE')
+
+        control_row = col.row(align=True)
+        control_row.scale_y = 0.9
+        control_row.operator("object.easy_edge_wear_regenerate", text="Regenerate", icon='FILE_REFRESH')
+        control_row.operator("object.easy_edge_wear_remove", text="Remove", icon="X")
+
         # Materials
         main_col.separator(factor=0.5)
         vox = main_col.box()
@@ -273,6 +288,8 @@ class EasyOpsPanel(bpy.types.Panel):
                     self.draw_remesh_modifier(mod_box, m)
                 elif m.type == 'MIRROR':
                     self.draw_mirror_modifier(mod_box, m)
+                elif m.name.startswith("EdgeWear_"):
+                    self.draw_edge_wear_modifier(mod_box, m)
     
     """Im doing this entire commit on a friday so i'm lazy. Will comment later"""
 
@@ -351,5 +368,35 @@ class EasyOpsPanel(bpy.types.Panel):
         row.prop(modifier, "use_bisect_axis", text="Bisect Axis")
 
         col.prop(modifier, "use_mirror_merge", text="Merge")  
+
+    def draw_edge_wear_modifier(self, layout, modifier):
+        box = layout.box()
+        header = box.row(align=True)
+        header.prop(modifier, "show_viewport", text="",
+                    icon='RESTRICT_VIEW_OFF' if modifier.show_viewport else 'RESTRICT_VIEW_ON')
+        
+        if modifier.type == 'NODES':
+            icon = 'GEOMETRY_NODES'
+            mod_type = "EdgeWear (Nodes)"
+        elif modifier.type == 'DISPLACE':
+            icon = 'MOD_DISPLACE'
+            mod_type = "EdgeWear (Displace)"
+        else:
+            icon = 'MOD_WAVE'
+            mod_type = "EdgeWear (Wave)"
+
+        header.label(text=f"{mod_type}: {modifier.name}", icon=icon)
+        delete_op = header.operator("object.modifier_remove", text="", icon="X")
+        delete_op.modifier = modifier.name
+
+        col = box.column(align=True)
+        col.scale_y = 0.8
+
+        col.operator("object.easy_edge_wear_regenerate", text="Regenerate", icon="FILE_REFRESH")
+
+        if modifier.type == 'DISPLACE' and hasattr(modifier, 'strength'):
+            col.prop(modifier, "strength", text="Strength", slider=True)
+        elif modifier.type == 'NODES' and modifier.node_group:
+            col.label(text="Geometry Nodes Active", icon='INFO')
 
 # TODO: Status and Info

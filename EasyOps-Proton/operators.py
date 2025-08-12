@@ -1069,7 +1069,7 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
         name="Wear Scale",
         description="Scale of the wear pattern",
         default=5.0,
-        mix=0.1,
+        min=0.1,
         max=50.0,
         precision=2
     )
@@ -1089,7 +1089,7 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
         default=0.05,
         min=0.001,
         max=1.0,
-        precision=3,
+        precision=3
     )
     wear_randomness: FloatProperty(
         name="Randomness",
@@ -1152,7 +1152,7 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
             if self.apply_modifiers:
                 utils.smart_apply_modifiers(obj)
 
-            self.remove_existing_wear_modifiers(obj)
+            self.remove_existing_wear_modifiers(context, obj)
             self.generate_edge_wear(context, obj)
 
             utils.recalculate_normals_for_objects(context, [obj])
@@ -1161,7 +1161,7 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
         self.report({'INFO'}, f"Edge wear applied to {processed_count} object(s).")
         return {'FINISHED'}
     
-    def remove_existing_wear_modfiers(self, context, obj):
+    def remove_existing_wear_modifiers(self, context, obj):
         mods_to_remove = []
         for mod in obj.modifiers:
             if mod.name.startswith("EdgeWear_"):
@@ -1171,21 +1171,22 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
             obj.modifiers.remove(mod)
 
     def generate_edge_wear(self, context, obj):
-        if self.subdivision_levels > 0:
-            subsurf = obj.modifiers.new("EdgeWear_Subsurf", 'SUBSURF')
-            subsurf.levels = min(self.subdivision_levels, 2)
         
         if self.has_geometry_nodes_support():
             self.add_geometry_nodes_wear(obj)
         else:
             self.add_displacement_wear(obj)
+
+        if self.subdivision_levels > 0:
+            subsurf = obj.modifiers.new("EdgeWear_Subsurf", 'SUBSURF')
+            subsurf.levels = min(self.subdivision_levels, 2)
         
         if self.wear_type in ['SMOOTH', 'MIXED']:
             smooth_mod = obj.modifiers.new("EdgeWear_Smooth", 'SMOOTH')
             smooth_mod.iterations = 2
-            smooth_mod.factor = 0.3
+            smooth_mod.factor = 0.2
     
-    def has_geomtery_nodes_support(self):
+    def has_geometry_nodes_support(self):
         return bpy.app.version >= (3, 0, 0)
 
     def add_geometry_nodes_wear(self, obj):
@@ -1193,16 +1194,207 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
         node_group = self.create_edge_wear_node_group()
         geo_mod.node_group = node_group
 
-        if "Intensity" in geo_mod:
-            geo_mod["Intensity"] = self.wear_intensity
-        if "Scale" in geo_mod:
-            geo_mod["Scale"] = self.wear_scale
-        if "Falloff" in geo_mod:
-            geo_mod["Falloff"] = self.wear_falloff
+        try:
+            geo_mod["Input_2"] = self.wear_intensity
+            geo_mod["Input_3"] = self.wear_scale
+            geo_mod["Input_4"] = self.wear_falloff
+            geo_mod["Input_5"] = self.wear_randomness
+            geo_mod["Input_6"] = self.edge_threshold
+        except (KeyError, TypeError):
+            for input_socket in geo_mod.node_group.interface.items_tree:
+                if hasattr(input_socket, 'socket_type') and input_socket.socket_type == 'NodeSocketFloat':
+                    if "Intensity" in input_socket.name:
+                        try:
+                            geo_mod[input_socket.identifier] = self.wear_intensity
+                        except:
+                            pass
+                    elif "Scale" in input_socket.name:
+                        try:
+                            geo_mod[input_socket.identifier] = self.wear_scale
+                        except:
+                            pass
+                    elif "Falloff" in input_socket.name:
+                        try:
+                            geo_mod[input_socket.identifier] = self.wear_falloff
+                        except:
+                            pass
+                    elif "Randomness" in input_socket.name:
+                        try:
+                            geo_mod[input_socket.identifier] = self.wear_randomness
+                        except:
+                            pass
+                    elif "Edge Angle" in input_socket.name:
+                        try:
+                            geo_mod[input_socket.identifier] = self.edge_threshold
+                        except:
+                            pass
+        if "EdgeWear_Edges" in obj.vertex_groups:
+            pass
 
     def create_edge_wear_node_group(self):
-        # just wait ok i need to research how to do this
-        return None
+
+        """
+            this was beyond unholy to do and unholy to test if this works first try I will rip out my toenail out of glee
+        """
+        group_name = "EdgeWear_NodeGroup"
+        if group_name in bpy.data.node_groups:
+            return bpy.data.node_groups[group_name]
+        
+        node_group = bpy.data.node_groups.new(group_name, 'GeometryNodeTree')
+        
+        group_input = node_group.nodes.new('NodeGroupInput')
+        group_output = node_group.nodes.new('NodeGroupOutput')
+        group_input.location = (-800, 0)
+        group_output.location = (800, 0)
+        
+        # Create input/output sockets
+        node_group.interface.new_socket(name="Geometry", socket_type='NodeSocketGeometry', in_out='INPUT')
+        node_group.interface.new_socket(name="Intensity", socket_type='NodeSocketFloat', in_out='INPUT')
+        node_group.interface.new_socket(name="Scale", socket_type='NodeSocketFloat', in_out='INPUT')
+        node_group.interface.new_socket(name="Falloff", socket_type='NodeSocketFloat', in_out='INPUT')
+        node_group.interface.new_socket(name="Randomness", socket_type='NodeSocketFloat', in_out='INPUT')
+        node_group.interface.new_socket(name="Edge Angle", socket_type='NodeSocketFloat', in_out='INPUT')
+        
+        node_group.interface.new_socket(name="Geometry", socket_type='NodeSocketGeometry', in_out='OUTPUT')
+        
+        # Set default values
+        node_group.interface.items_tree["Intensity"].default_value = 0.1
+        node_group.interface.items_tree["Scale"].default_value = 5.0
+        node_group.interface.items_tree["Falloff"].default_value = 0.05
+        node_group.interface.items_tree["Randomness"].default_value = 0.5
+        node_group.interface.items_tree["Edge Angle"].default_value = math.radians(45)
+        
+        nodes = node_group.nodes
+        links = node_group.links
+
+        edge_angle = nodes.new('GeometryNodeInputMeshEdgeAngle')
+        edge_angle.location = (-600, 200)
+
+        compare = nodes.new('FunctionNodeCompare')
+        compare.location = (-400, 200)
+        compare.data_type = 'FLOAT'
+        compare.operation = 'GREATER_THAN'
+        
+        position = nodes.new('GeometryNodeInputPosition')
+        position.location = (-600, -100)
+        
+        vector_scale = nodes.new('ShaderNodeVectorMath')
+        vector_scale.location = (-500, -100)
+        vector_scale.operation = 'MULTIPLY'
+
+        noise_texture = nodes.new('ShaderNodeTexNoise')
+        noise_texture.location = (-400, -100)
+        noise_texture.noise_dimensions = '3D'
+
+        voronoi = nodes.new('ShaderNodeTexVoronoi')
+        voronoi.location = (-400, -300)
+        voronoi.voronoi_dimensions = '3D'
+        voronoi.feature = 'F1'
+
+        wave = nodes.new('ShaderNodeTexWave')
+        wave.location = (-400, -400)
+        wave.wave_type = 'BANDS'
+        wave.wave_profile = 'SAW'
+        
+        mix_wear_types = nodes.new('ShaderNodeMix')
+        mix_wear_types.location = (-100, -300)
+        mix_wear_types.data_type = 'FLOAT'
+        mix_wear_types.blend_type = 'MIX'
+
+        random_value = nodes.new('FunctionNodeRandomValue')
+        random_value.location = (-400, -200)
+        random_value.data_type = 'FLOAT'
+
+        vector_to_float = nodes.new('ShaderNodeSeparateXYZ')
+        vector_to_float.location = (-500, -200)
+        
+        add_xyz = nodes.new('ShaderNodeMath')
+        add_xyz.location = (-450, -150)
+        add_xyz.operation = 'ADD'
+        
+        add_z = nodes.new('ShaderNodeMath') 
+        add_z.location = (-400, -150)
+        add_z.operation = 'ADD'
+        
+        color_ramp = nodes.new('ShaderNodeValToRGB')
+        color_ramp.location = (0, -300)
+        color_ramp.color_ramp.elements[0].position = 0.3
+        color_ramp.color_ramp.elements[0].color = (0, 0, 0, 1)
+        color_ramp.color_ramp.elements[1].position = 0.7
+        color_ramp.color_ramp.elements[1].color = (1, 1, 1, 1)
+        
+        multiply_intensity = nodes.new('ShaderNodeMath')
+        multiply_intensity.location = (-200, -100)
+        multiply_intensity.operation = 'MULTIPLY'
+
+        multiply_edge_noise = nodes.new('ShaderNodeMath')
+        multiply_edge_noise.location = (0, 0)
+        multiply_edge_noise.operation = 'MULTIPLY'
+        
+
+        normal = nodes.new('GeometryNodeInputNormal')
+        normal.location = (0, -200)
+        
+        displacement_vector = nodes.new('ShaderNodeVectorMath')
+        displacement_vector.location = (200, -100)
+        displacement_vector.operation = 'MULTIPLY'
+        
+        negate_displacement = nodes.new('ShaderNodeMath')
+        negate_displacement.location = (300, -200)
+        negate_displacement.operation = 'MULTIPLY'
+        negate_displacement.inputs[1].default_value = -1.0
+        final_intensity = nodes.new('ShaderNodeMath')
+        final_intensity.location = (400, -100)
+        final_intensity.operation = 'MULTIPLY'
+        
+        set_position = nodes.new('GeometryNodeSetPosition')
+        set_position.location = (600, 0)
+
+        links.new(group_input.outputs["Geometry"], set_position.inputs["Geometry"])
+        links.new(set_position.outputs["Geometry"], group_output.inputs["Geometry"])
+
+        links.new(edge_angle.outputs["Unsigned Angle"], compare.inputs[0])
+        links.new(group_input.outputs["Edge Angle"], compare.inputs[1])
+
+        links.new(position.outputs["Position"], vector_scale.inputs[0])
+        links.new(group_input.outputs["Scale"], vector_scale.inputs[1])
+
+        links.new(vector_scale.outputs["Vector"], noise_texture.inputs["Vector"])
+        links.new(group_input.outputs["Scale"], noise_texture.inputs["Scale"])
+        
+        links.new(vector_scale.outputs["Vector"], voronoi.inputs["Vector"])
+        links.new(group_input.outputs["Scale"], voronoi.inputs["Scale"])
+        
+        links.new(vector_scale.outputs["Vector"], wave.inputs["Vector"])
+        links.new(group_input.outputs["Scale"], wave.inputs["Scale"])
+
+        links.new(position.outputs["Position"], vector_to_float.inputs["Vector"])
+        links.new(vector_to_float.outputs["X"], add_xyz.inputs[0])
+        links.new(vector_to_float.outputs["Y"], add_xyz.inputs[1])
+        links.new(add_xyz.outputs["Value"], add_z.inputs[0])
+        links.new(vector_to_float.outputs["Z"], add_z.inputs[1])
+        links.new(add_z.outputs["Value"], random_value.inputs["ID"])
+
+        links.new(noise_texture.outputs["Fac"], mix_wear_types.inputs["A"])
+        links.new(voronoi.outputs["Distance"], mix_wear_types.inputs["B"])
+        links.new(group_input.outputs["Randomness"], mix_wear_types.inputs["Factor"])
+        links.new(mix_wear_types.outputs["Result"], color_ramp.inputs["Fac"])
+        
+        links.new(color_ramp.outputs["Color"], multiply_intensity.inputs[0])
+        links.new(group_input.outputs["Intensity"], multiply_intensity.inputs[1])
+        
+        links.new(compare.outputs["Result"], multiply_edge_noise.inputs[0])
+        links.new(multiply_intensity.outputs["Value"], multiply_edge_noise.inputs[1])
+        links.new(multiply_edge_noise.outputs["Value"], negate_displacement.inputs[0])
+        links.new(negate_displacement.outputs["Value"], final_intensity.inputs[0])
+        links.new(group_input.outputs["Falloff"], final_intensity.inputs[1])
+    
+        links.new(normal.outputs["Normal"], displacement_vector.inputs[0])
+        links.new(final_intensity.outputs["Value"], displacement_vector.inputs[1])
+        links.new(displacement_vector.outputs["Vector"], set_position.inputs["Offset"])
+        
+        return node_group
+
 
     def add_displacement_wear(self, obj):
         edge_group = self.create_edge_vertex_group(obj)
@@ -1213,7 +1405,8 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
         displace_mod.direction = 'NORMAL'
 
         wear_texture = self.create_wear_texture()
-        displace_mod.texture = wear_texture
+        if wear_texture:
+            displace_mod.texture = wear_texture
 
         if self.wear_type in ['SCRATCH', 'MIXED']:
             wave_mod = obj.modifiers.new("EdgeWear_Wave", 'WAVE')
@@ -1221,7 +1414,7 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
             wave_mod.height = self.wear_intensity * 0.5
             wave_mod.width = 1.0
             wave_mod.speed = 0
-            wave_mod.offset = random.random() * 6.28 #hehehe
+            wave_mod.speed = random.random() * 6.28 #hehehe
 
         smooth_mod = obj.modifiers.new("EdgeWear_CorrectiveSmooth", 'CORRECTIVE_SMOOTH')
         smooth_mod.iterations = 3
@@ -1245,6 +1438,7 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
             bm = bmesh.from_edit_mesh(obj.data)
             bm.edges.ensure_lookup_table()
             bm.faces.ensure_lookup_table()
+            bm.verts.ensure_lookup_table()
 
             for v in bm.verts:
                 v.select = False
@@ -1267,7 +1461,7 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
                     add_edge = True
 
                 if add_edge:
-                    edge_verts.update([v.index forv in edge.verts])
+                    edge_verts.update([v.index for v in edge.verts])
 
             if self.wear_falloff > 0:
                 extended_verts = set(edge_verts)
@@ -1312,9 +1506,16 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
         if texture_name in bpy.data.textures:
             bpy.data.textures.remove(bpy.data.textures[texture_name])
 
-            wear_texture = bpy.data.textures.new(texture_name, 'NOISE')
+        wear_texture = bpy.data.textures.new(texture_name, 'NOISE')
+        
+        try:
             wear_texture.noise_scale = self.wear_scale
-
+        except AttributeError:
+            if hasattr(wear_texture, 'scale'):
+                wear_texture.scale = self.wear_scale
+            else:
+                print(f"Warning: Could not set noise scale for texture {texture_name}")
+        try:
             if self.wear_type == 'SCRATCH':
                 wear_texture.noise_basis = 'BLENDER_ORIGINAL'
                 wear_texture.noise_type = 'HARD_NOISE'
@@ -1324,11 +1525,18 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
             elif self.wear_type == 'SMOOTH':
                 wear_texture.noise_basis = 'IMPROVED_PERLIN'
                 wear_texture.noise_type = 'SOFT_NOISE'
-            else:
+            else:  
                 wear_texture.noise_basis = 'BLENDER_ORIGINAL'
                 wear_texture.noise_type = 'SOFT_NOISE'
+        except AttributeError as e:
+            print(f"Warning: Could not set noise properties: {e}")
+            try:
+                wear_texture.noise_basis = 'PERLIN_ORIGINAL'
+                wear_texture.noise_type = 'SOFT_NOISE'
+            except:
+                pass
 
-            return wear_texture
+        return wear_texture
     
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self, width=400)
@@ -1354,7 +1562,7 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
         col.prop(self, "preserve_sharp_edges")
         col.prop(self, "seed")
     
-class OBJECT_OT_easy_edge_wear_regenerate(bpy.typesOperator):
+class OBJECT_OT_easy_edge_wear_regenerate(bpy.types.Operator):
     bl_idname = "object.easy_edge_wear_regenerate"
     bl_label = "Regenerate Edge Wear"
     bl_options = {'REGISTER', 'UNDO'}

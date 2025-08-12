@@ -1513,8 +1513,40 @@ class OBJECT_OT_easy_cylinder_boolean(OBJECT_OT_easy_free_boolean_base):
         if not self.cylinder_defined:
             return self.handle_cylinder_input(context, event)
         else:
+            if event.type == 'Z' and event.value == 'PRESS':
+                self.radius_defined = False
+                self.cylinder_defined = False
+                self.current_radius = 0.1
+                self.points = []
+                self.update_preview(context)
+                self.update_wireframe_preview(context)
+                self.report({'INFO'}, "Reset radius. LMB + Drag to redefine the radius")
+                
             return super().modal(context, event)
     
+    def update_cylinder_radius_preview(self, context, event):
+        if not self.center_point:
+            return
+        
+        current_pos = self.mouse_to_world_point(context, event)
+        if current_pos:
+            radius_vector = current_pos - self.center_point
+            plane_normal = self.drawing_plane_normal
+            radius_vector = radius_vector - radius_vector.dot(plane_normal) * plane_normal
+            
+            preview_radius = max(0.01, radius_vector.length)
+
+            if self.grid_snap and not self.shift_held:
+                grid_size = 0.1
+                preview_radius = round(preview_radius / grid_size) * grid_size
+                preview_radius = max(0.01, preview_radius)
+            
+            if abs(self.current_radius - preview_radius) > 0.001:
+                self.current_radius = preview_radius
+                self.generate_cylinder_points()
+                self.update_preview(context)
+                self.update_wireframe_preview(context)
+
     def handle_cylinder_input(self, context, event):
         self.mouse_pos = Vector((event.mouse_region_x, event.mouse_region_y))
         self.shift_held = event.shift
@@ -1541,6 +1573,9 @@ class OBJECT_OT_easy_cylinder_boolean(OBJECT_OT_easy_free_boolean_base):
             if self.defining_radius:
                 self.update_cylinder_radius(context, event)
                 return {'RUNNING_MODAL'}
+            elif self.center_point and not self.radius_defined:
+                self.update_cylinder_radius_preview(context, event)
+                return {'RUNNING_MODAL'}
         elif event.type == 'LEFTMOUSE' and event.value == 'RELEASE':
             if self.defining_radius:
                 self.finish_cylinder_definition(context, event)
@@ -1555,7 +1590,7 @@ class OBJECT_OT_easy_cylinder_boolean(OBJECT_OT_easy_free_boolean_base):
                 self.update_wireframe_preview(context)
             return {'RUNNING_MODAL'}
 
-        elif event.type == 'WHEELUPMOUSE' and not self.radius_defined:
+        elif event.type == 'WHEELDOWNMOUSE' and not self.radius_defined:
             self.segments = max(6, self.segments - 2)
             self.report({'INFO'}, f"Segments: {self.segments}")
             if self.center_point:
@@ -1571,6 +1606,25 @@ class OBJECT_OT_easy_cylinder_boolean(OBJECT_OT_easy_free_boolean_base):
             self.operation = operations[next_index]
             self.report({'INFO'}, f"Boolean operation: {self.operation}")
             return {'RUNNING_MODAL'}
+        
+        elif event.type == 'Z' and event.value == 'PRESS':
+            if self.radius_defined:
+                self.radius_defined = False
+                self.cylinder_defined = False
+                self.current_radius = 0.1
+                self.points = []
+                self.update_preview(context)
+                self.update_wireframe_preview(context)
+                self.report({'INFO'}, "Reset radius. LMB + Drag to redefine the radius")
+            elif self.center_point:
+                self.center_point = None
+                self.current_radius = 0.1
+                self.points = []
+                self.update_preview(context)
+                self.update_wireframe_preview(context)
+                self.report({'INFO'}, "Reset cylinder. LMB to set center")
+
+            return {'RUNNING_MODAL'}
 
         elif event.type in {'ESC'}:
             self.cleanup(context)
@@ -1581,6 +1635,9 @@ class OBJECT_OT_easy_cylinder_boolean(OBJECT_OT_easy_free_boolean_base):
     def set_cylinder_center(self, context, event):
         self.center_point = self.mouse_to_world_point(context, event)
         if self.center_point:
+            self.generate_cylinder_points()
+            self.update_preview(context)
+            self.update_wireframe_preview(context)
             self.report({'INFO'}, "Center set. LMB+Drag to define radius")
 
     def start_radius_definition(self, context, event):
@@ -1599,7 +1656,7 @@ class OBJECT_OT_easy_cylinder_boolean(OBJECT_OT_easy_free_boolean_base):
             self.current_radius = max(0.01, radius_vector.length)
 
             if self.grid_snap and not self.shift_held:
-                grid_size = self.get_grid_size(context)
+                grid_size = 0.1
                 self.current_radius = round(self.current_radius / grid_size) * grid_size
                 self.current_radius = max(0.01, self.current_radius)
             

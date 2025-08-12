@@ -86,3 +86,48 @@ def recalculate_normals_for_objects(context, objects):
                 bpy.ops.object.mode_set(mode=original_mode.replace('_','').lower())
             except:
                 pass
+
+def smart_apply_modifiers(obj):
+    if not obj.modifiers:
+        return
+
+    priority_order = {
+        'BOOLEAN': 1,      
+        'MIRROR': 2,     
+        'ARRAY': 3,       
+        'SOLIDIFY': 4,    
+        # 'BEVEL': 5,    LOL ARE U FKN STUPID?    
+        'REMESH': 5,     
+        'DECIMATE': 6,    
+        'SUBSURF': 7,     
+    }
+
+    priority_mods = []
+    other_mods = []
+
+    for mod in obj.modifiers:
+        if mod.type in priority_order:
+            priority_mods.append((priority_order[mod.type], mod))
+        else:
+            other_mods.append(mod)
+    
+    priority_mods.sort(key=lambda x: x[0])
+
+    for _, mod in priority_mods:
+        if mod.type == 'BOOLEAN' and (not mod.object or mod.object.name not in bpy.data.objects):
+            obj.modifiers.remove(mod)
+            continue
+        
+        try:
+            bpy.ops.object.modifier_apply(modifier=mod.name)
+        except:
+            if mod.name in obj.modifiers:
+                obj.modifiers.remove(mod)
+
+    for mod in other_mods:
+        try:
+            if mod.type != 'BEVEL':
+                bpy.ops.object.modifier_apply(modifier=mod.name)
+        except:
+            if mod.name in obj.modifiers:
+                obj.modifiers.remove(mod)

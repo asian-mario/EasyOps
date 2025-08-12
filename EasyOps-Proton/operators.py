@@ -411,7 +411,7 @@ class OBJECT_OT_easy_ssharpen(bpy.types.Operator):
                 context.view_layer.objects.active = obj
 
                 if self.apply_modifiers:
-                    self.smart_apply_modifiers(obj)
+                    utils.smart_apply_modifiers(obj)
                     utils.recalculate_normals_for_objects(context, [obj])
 
                 bpy.ops.object.mode_set(mode='EDIT')
@@ -440,51 +440,6 @@ class OBJECT_OT_easy_ssharpen(bpy.types.Operator):
         
         self.report({'INFO'}, f"SSharpen applied to {processed_count} objects.")
         return {'FINISHED'}
-
-    def smart_apply_modifiers(self, obj):
-        if not obj.modifiers:
-            return
-
-        priority_order = {
-            'BOOLEAN': 1,      
-            'MIRROR': 2,     
-            'ARRAY': 3,       
-            'SOLIDIFY': 4,    
-            # 'BEVEL': 5,    LOL ARE U FKN STUPID?    
-            'REMESH': 5,     
-            'DECIMATE': 6,    
-            'SUBSURF': 7,     
-        }
-
-        priority_mods = []
-        other_mods = []
-
-        for mod in obj.modifiers:
-            if mod.type in priority_order:
-                priority_mods.append((priority_order[mod.type], mod))
-            else:
-                other_mods.append(mod)
-        
-        priority_mods.sort(key=lambda x: x[0])
-
-        for _, mod in priority_mods:
-            if mod.type == 'BOOLEAN' and (not mod.object or mod.object.name not in bpy.data.objects):
-                obj.modifiers.remove(mod)
-                continue
-            
-            try:
-                bpy.ops.object.modifier_apply(modifier=mod.name)
-            except:
-                if mod.name in obj.modifiers:
-                    obj.modifiers.remove(mod)
-
-        for mod in other_mods:
-            try:
-                if mod.type != 'BEVEL':
-                    bpy.ops.object.modifier_apply(modifier=mod.name)
-            except:
-                if mod.name in obj.modifiers:
-                    obj.modifiers.remove(mod)
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self)
@@ -1095,3 +1050,366 @@ class OBJECT_OT_easy_mirror_gizmo(bpy.types.Operator):
         blf.size(font_id, 12)
         blf.color(font_id, *color)
         blf.draw(font_id, text)
+
+class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
+    bl_idname = "object.easy_edge_wear"
+    bl_label = "Edge Wear"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    wear_intensity: FloatProperty(
+        name="Wear Intensity",
+        description="Intensity of edge wear",
+        default = 0.1,
+        min=0.001,
+        max=1.0,
+        precision=3
+    )
+
+    wear_scale: FloatProperty(
+        name="Wear Scale",
+        description="Scale of the wear pattern",
+        default=5.0,
+        mix=0.1,
+        max=50.0,
+        precision=2
+    )
+
+    edge_threshold: FloatProperty(
+        name="Edge Detection Angle",
+        description="Angle threshold for detecting sharp edges",
+        default=math.radians(45),
+        min=math.radians(1),
+        max=math.radians(180),
+        unit='ROTATION'
+    )
+
+    wear_falloff: FloatProperty(
+        name="Wear Falloff",
+        description="Distance the wear extends from the edges",
+        default=0.05,
+        min=0.001,
+        max=1.0,
+        precision=3,
+    )
+    wear_randomness: FloatProperty(
+        name="Randomness",
+        description="Randomness in wear pattern",
+        default=0.5,
+        min=0.0,
+        max=1.0,
+        precision=2
+    )
+    
+    wear_type: EnumProperty(
+        name="Wear Type",
+        description="Type of wear pattern to generate",
+        items=[
+            ('SCRATCH', "Scratches", "Generate scratch-like wear patterns"),
+            ('CHIPS', "Chips", "Generate chipped edge patterns"),
+            ('SMOOTH', "Smooth Wear", "Generate smooth worn edges"),
+            ('MIXED', "Mixed", "Combination of wear types"),
+        ],
+        default='MIXED'
+    )
+    
+    subdivision_levels: IntProperty(
+        name="Detail Level",
+        description="Subdivision levels for wear detail",
+        default=2,
+        min=1,
+        max=4
+    )
+    
+    apply_modifiers: BoolProperty(
+        name="Apply Existing Modifiers",
+        description="Apply existing modifiers before adding wear",
+        default=True
+    )
+    
+    preserve_sharp_edges: BoolProperty(
+        name="Preserve Sharp Edges",
+        description="Keep original sharp edge marking",
+        default=True
+    )
+    
+    seed: IntProperty(
+        name="Random Seed",
+        description="Seed for randomization",
+        default=0,
+        min=0,
+        max=999999
+    )
+
+    def execute(self, context):
+        random.seed(self.seed)
+        processed_count = 0
+
+        for obj in utils.get_target_objects(context):
+            if obj.type != 'MESH':
+                continue
+
+            context.view_layer.objects.active = obj
+            if self.apply_modifiers:
+                utils.smart_apply_modifiers(obj)
+
+            self.remove_existing_wear_modifiers(obj)
+            self.generate_edge_wear(context, obj)
+
+            utils.recalculate_normals_for_objects(context, [obj])
+            processed_count += 1
+        
+        self.report({'INFO'}, f"Edge wear applied to {processed_count} object(s).")
+        return {'FINISHED'}
+    
+    def remove_existing_wear_modfiers(self, context, obj):
+        mods_to_remove = []
+        for mod in obj.modifiers:
+            if mod.name.startswith("EdgeWear_"):
+                mods_to_remove.append(mod)
+        
+        for mod in mods_to_remove:
+            obj.modifiers.remove(mod)
+
+    def generate_edge_wear(self, context, obj):
+        if self.subdivision_levels > 0:
+            subsurf = obj.modifiers.new("EdgeWear_Subsurf", 'SUBSURF')
+            subsurf.levels = min(self.subdivision_levels, 2)
+        
+        if self.has_geometry_nodes_support():
+            self.add_geometry_nodes_wear(obj)
+        else:
+            self.add_displacement_wear(obj)
+        
+        if self.wear_type in ['SMOOTH', 'MIXED']:
+            smooth_mod = obj.modifiers.new("EdgeWear_Smooth", 'SMOOTH')
+            smooth_mod.iterations = 2
+            smooth_mod.factor = 0.3
+    
+    def has_geomtery_nodes_support(self):
+        return bpy.app.version >= (3, 0, 0)
+
+    def add_geometry_nodes_wear(self, obj):
+        geo_mod = obj.modifiers.new("EdgeWear_Geometry", 'NODES')
+        node_group = self.create_edge_wear_node_group()
+        geo_mod.node_group = node_group
+
+        if "Intensity" in geo_mod:
+            geo_mod["Intensity"] = self.wear_intensity
+        if "Scale" in geo_mod:
+            geo_mod["Scale"] = self.wear_scale
+        if "Falloff" in geo_mod:
+            geo_mod["Falloff"] = self.wear_falloff
+
+    def create_edge_wear_node_group(self):
+        # just wait ok i need to research how to do this
+        return None
+
+    def add_displacement_wear(self, obj):
+        edge_group = self.create_edge_vertex_group(obj)
+
+        displace_mod = obj.modifiers.new("EdgeWear_Displace", 'DISPLACE')
+        displace_mod.vertex_group = edge_group.name
+        displace_mod.strength = -self.wear_intensity
+        displace_mod.direction = 'NORMAL'
+
+        wear_texture = self.create_wear_texture()
+        displace_mod.texture = wear_texture
+
+        if self.wear_type in ['SCRATCH', 'MIXED']:
+            wave_mod = obj.modifiers.new("EdgeWear_Wave", 'WAVE')
+            wave_mod.vertex_group = edge_group.name
+            wave_mod.height = self.wear_intensity * 0.5
+            wave_mod.width = 1.0
+            wave_mod.speed = 0
+            wave_mod.offset = random.random() * 6.28 #hehehe
+
+        smooth_mod = obj.modifiers.new("EdgeWear_CorrectiveSmooth", 'CORRECTIVE_SMOOTH')
+        smooth_mod.iterations = 3
+        smooth_mod.smooth_type = 'LENGTH_WEIGHTED'
+    
+    def create_edge_vertex_group(self, obj):
+        group_name = "EdgeWear_Edges"
+        if group_name in obj.vertex_groups:
+            obj.vertex_groups.remove(obj.vertex_groups[group_name])
+        
+        edge_group = obj.vertex_groups.new(name=group_name)
+
+        original_active = bpy.context.view_layer.objects.active
+        bpy.context.view_layer.objects.active = obj
+
+        angle_degrees = math.degrees(self.edge_threshold)
+        original_mode = bpy.context.mode
+
+        try:
+            bpy.ops.object.mode_set(mode='EDIT')
+            bm = bmesh.from_edit_mesh(obj.data)
+            bm.edges.ensure_lookup_table()
+            bm.faces.ensure_lookup_table()
+
+            for v in bm.verts:
+                v.select = False
+            for e in bm.edges:
+                e.select = False
+            for f in bm.faces:
+                f.select = False
+
+            edge_verts = set()
+            thresh = self.edge_threshold
+
+            for edge in bm.edges:
+                add_edge = False
+                # this is going to be similar to detect_sharp_edges but i need to modify it a little so i wont be calling it
+                if edge.is_manifold and len(edge.link_faces) == 2:
+                    angle = edge.link_faces[0].normal.angle(edge.link_faces[1].normal)
+                    if angle > thresh:
+                        add_edge = True
+                elif len(edge.link_faces) == 1:
+                    add_edge = True
+
+                if add_edge:
+                    edge_verts.update([v.index forv in edge.verts])
+
+            if self.wear_falloff > 0:
+                extended_verts = set(edge_verts)
+                for vert_idx in list(edge_verts):
+                    vert = bm.verts[vert_idx]
+                    for edge in vert.link_edges:
+                        for connected_vert in edge.verts:
+                            if connected_vert.index not in extended_verts:
+                                dist = (vert.co - connected_vert.co).length
+                                if dist <= self.wear_falloff:
+                                    weight = 1.0 - (dist / self.wear_falloff)
+
+                                    if random.random() < weight * (1.0 - self.wear_randomness * 0.5):
+                                        extended_verts.add(connected_vert.index)
+                
+                edge_verts = extended_verts
+
+            bmesh.update_edit_mesh(obj.data)
+            bpy.ops.object.mode_set(mode='OBJECT')
+
+            for vert_idx in edge_verts:
+                base_weight = 1.0
+                if self.wear_randomness > 0:
+                    weight_variation = self.wear_randomness * random.random()
+                    base_weight = max(0.1, 1.0 - weight_variation)
+
+                edge_group.add([vert_idx], base_weight, 'REPLACE')
+        
+        finally:
+            bpy.context.view_layer.objects.active = original_active
+            if original_mode != 'OBJECT':
+                try:
+                    bpy.ops.object.mode_set(mode=original_mode.replace('_', '').lower())
+                except:
+                    pass
+        
+        return edge_group
+
+    def create_wear_texture(self):
+        texture_name = f"EdgeWear_Texture_{self.seed}"
+
+        if texture_name in bpy.data.textures:
+            bpy.data.textures.remove(bpy.data.textures[texture_name])
+
+            wear_texture = bpy.data.textures.new(texture_name, 'NOISE')
+            wear_texture.noise_scale = self.wear_scale
+
+            if self.wear_type == 'SCRATCH':
+                wear_texture.noise_basis = 'BLENDER_ORIGINAL'
+                wear_texture.noise_type = 'HARD_NOISE'
+            elif self.wear_type == 'CHIPS':
+                wear_texture.noise_basis = 'VORONOI_CRACKLE'
+                wear_texture.noise_type = 'HARD_NOISE'
+            elif self.wear_type == 'SMOOTH':
+                wear_texture.noise_basis = 'IMPROVED_PERLIN'
+                wear_texture.noise_type = 'SOFT_NOISE'
+            else:
+                wear_texture.noise_basis = 'BLENDER_ORIGINAL'
+                wear_texture.noise_type = 'SOFT_NOISE'
+
+            return wear_texture
+    
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=400)
+    
+    def draw(self, context):
+        layout = self.layout
+
+        col = layout.column()
+        col.prop(self, "wear_type")
+        col.prop(self, "wear_intensity")
+        col.prop(self, "wear_falloff")
+        col.prop(self, "wear_randomness")
+
+        layout.separator()
+
+        col = layout.column()
+        col.label(text="Edge Detection:")
+        col.prop(self, "edge_threshold")
+
+        layout.separator()
+        col = layout.column()
+        col.prop(self, "apply_modifiers")
+        col.prop(self, "preserve_sharp_edges")
+        col.prop(self, "seed")
+    
+class OBJECT_OT_easy_edge_wear_regenerate(bpy.typesOperator):
+    bl_idname = "object.easy_edge_wear_regenerate"
+    bl_label = "Regenerate Edge Wear"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        new_seed = random.randint(0, 999999)
+
+        bpy.ops.object.easy_edge_wear(
+            'INVOKE_DEFAULT',
+            seed=new_seed
+        )
+
+        return {'FINISHED'}
+
+class OBJECT_OT_easy_edge_wear_remove(bpy.types.Operator):
+    bl_idname = "object.easy_edge_wear_remove"
+    bl_label = "Remove Edge Wear"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        removed_count = 0
+
+        for obj in utils.get_target_objects(context):
+            if obj.type != 'MESH':
+                continue
+
+            mods_to_remove = []
+            for mod in obj.modifiers:
+                if mod.name.startswith("EdgeWear_"):
+                    mods_to_remove.append(mod)
+                    removed_count += 1
+        
+            groups_to_remove = []
+            for group in obj.vertex_groups:
+                if group.name.startswith("EdgeWear_"):
+                    groups_to_remove.append(group)
+            
+            for group in groups_to_remove:
+                obj.vertex_groups.remove(group)
+
+            textures_to_remove = []
+            for texture in bpy.data.textures:
+                if texture.name.startswith("EdgeWear_Texture_"):
+                    texture_users = sum(1 for obj_check in bpy.data.objects
+                                        if obj_check.type == 'MESH'
+                                        for mod in obj_check.modifiers
+                                        if hasattr(mod, 'texture') and mod.texture == texture)
+
+                    if texture_users <= 1:
+                        textures_to_remove.append(texture)
+            
+            for texture in textures_to_remove:
+                bpy.data.textures.remove(texture)
+
+        self.report({'INFO'}, f"Removed edge wear from objects ({removed_count} modifiers removed)")
+        return {'FINISHED'}
+                                    
+                            

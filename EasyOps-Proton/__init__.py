@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Easy Utils & EasyOps",
     "author": "asianmario",
-    "version": (0, 1, 8),
+    "version": (0, 2, 0),
     "blender": (4, 5, 0),
     "location": "View3D > Sidebar > Easy Utils",
     "description": "A collection of modelling and cleanup utilities",

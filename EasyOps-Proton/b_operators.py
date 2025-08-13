@@ -1092,8 +1092,32 @@ class OBJECT_OT_easy_rectangle_boolean(OBJECT_OT_easy_free_boolean_base):
 
         return result
 
+    def handle_undo(self, context, event):
+        if event.type == 'Z' and event.value == 'PRESS':
+            if self.rectangle_defined:
+                self.rectangle_defined = False
+                self.is_dragging = False
+                self.start_point = None
+                self.current_point = None
+                self.points = []
+                self.update_preview(context)
+                self.update_wireframe_preview(context)
+                self.report({'INFO'}, "Rectangle reset. LMB + Drag to define rectangle")
+                return True
+            else:
+                self.cleanup(context)
+                return True
+            
+        return False
+    
     def modal(self, context, event):
         context.area.tag_redraw()
+
+        undo_result = self.handle_undo(context, event)
+        if undo_result == 'CANCELLED':
+            return {'CANCELLED'}
+        elif undo_result:
+            return {'RUNNING_MODAL'}
 
         # Handle rectangle-specific input
         if not self.rectangle_defined:

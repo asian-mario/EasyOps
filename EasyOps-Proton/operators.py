@@ -1132,6 +1132,12 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
         default=True
     )
     
+    use_geonodes: BoolProperty(
+        name="Use Geonodes",
+        description="Either use Geonodes or Texture displacement method",
+        default=True
+    )
+
     seed: IntProperty(
         name="Random Seed",
         description="Seed for randomization",
@@ -1171,23 +1177,27 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
             obj.modifiers.remove(mod)
 
     def generate_edge_wear(self, context, obj):
-        
-        if self.has_geometry_nodes_support():
+        if self.subdivision_levels > 0:
+            subsurf = obj.modifiers.new("EdgeWear_Subsurf", 'SUBSURF')
+            subsurf.levels = 5
+            subsurf.subdivision_type = 'SIMPLE'
+
+        if self.use_geonodes:
             self.add_geometry_nodes_wear(obj)
         else:
             self.add_displacement_wear(obj)
-
-        if self.subdivision_levels > 0:
-            subsurf = obj.modifiers.new("EdgeWear_Subsurf", 'SUBSURF')
-            subsurf.levels = min(self.subdivision_levels, 2)
         
         if self.wear_type in ['SMOOTH', 'MIXED']:
             smooth_mod = obj.modifiers.new("EdgeWear_Smooth", 'SMOOTH')
             smooth_mod.iterations = 2
             smooth_mod.factor = 0.2
-    
-    def has_geometry_nodes_support(self):
-        return bpy.app.version >= (3, 0, 0)
+        
+        bpy.context.view_layer.objects.active = obj
+        for mod in obj.modifiers:
+            if mod.type == 'BEVEL':
+                while obj.modifiers.find(mod.name) < len(obj.modifiers) - 1:
+                    bpy.ops.object.modifier_move_down(modifier=mod.name)
+
 
     def add_geometry_nodes_wear(self, obj):
         geo_mod = obj.modifiers.new("EdgeWear_Geometry", 'NODES')
@@ -1230,6 +1240,8 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
                             pass
         if "EdgeWear_Edges" in obj.vertex_groups:
             pass
+            
+        return geo_mod
 
     def create_edge_wear_node_group(self):
 
@@ -1543,6 +1555,9 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
     
     def draw(self, context):
         layout = self.layout
+
+        col = layout.column()
+        col.prop(self, "use_geonodes")
 
         col = layout.column()
         col.prop(self, "wear_type")

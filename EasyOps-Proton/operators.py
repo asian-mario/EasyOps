@@ -1178,8 +1178,8 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
 
     def generate_edge_wear(self, context, obj):
         if self.subdivision_levels > 0:
-            subsurf = obj.modifiers.new("EdgeWear_Subsurf", 'SUBSURF')
-            subsurf.levels = 5
+            subsurf = obj.modifiers.new("EdgeWear_Detail", 'SUBSURF')
+            subsurf.levels = 4
             subsurf.subdivision_type = 'SIMPLE'
 
         if self.use_geonodes:
@@ -1410,26 +1410,14 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
 
     def add_displacement_wear(self, obj):
         edge_group = self.create_edge_vertex_group(obj)
-
-        displace_mod = obj.modifiers.new("EdgeWear_Displace", 'DISPLACE')
-        displace_mod.vertex_group = edge_group.name
-        displace_mod.strength = -self.wear_intensity
-        displace_mod.direction = 'NORMAL'
-
-        wear_texture = self.create_wear_texture()
-        if wear_texture:
-            displace_mod.texture = wear_texture
-
-        if self.wear_type in ['SCRATCH', 'MIXED']:
-            wave_mod = obj.modifiers.new("EdgeWear_Wave", 'WAVE')
-            wave_mod.vertex_group = edge_group.name
-            wave_mod.height = self.wear_intensity * 0.5
-            wave_mod.width = 1.0
-            wave_mod.speed = 0
-            wave_mod.speed = random.random() * 6.28 #hehehe
-
+        
+        if self.wear_type in ['SMOOTH', 'MIXED']:
+            self.add_vertex_group_only_displacement(obj, edge_group)
+        else:
+            self.add_masked_texture_displacement(obj, edge_group)
+        
         smooth_mod = obj.modifiers.new("EdgeWear_CorrectiveSmooth", 'CORRECTIVE_SMOOTH')
-        smooth_mod.iterations = 3
+        smooth_mod.iterations = 2
         smooth_mod.smooth_type = 'LENGTH_WEIGHTED'
     
     def create_edge_vertex_group(self, obj):
@@ -1438,69 +1426,79 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
             obj.vertex_groups.remove(obj.vertex_groups[group_name])
         
         edge_group = obj.vertex_groups.new(name=group_name)
-
+        
         original_active = bpy.context.view_layer.objects.active
         bpy.context.view_layer.objects.active = obj
-
-        angle_degrees = math.degrees(self.edge_threshold)
         original_mode = bpy.context.mode
-
+        
         try:
             bpy.ops.object.mode_set(mode='EDIT')
             bm = bmesh.from_edit_mesh(obj.data)
             bm.edges.ensure_lookup_table()
             bm.faces.ensure_lookup_table()
             bm.verts.ensure_lookup_table()
-
+            
             for v in bm.verts:
                 v.select = False
             for e in bm.edges:
                 e.select = False
             for f in bm.faces:
                 f.select = False
-
-            edge_verts = set()
+            
+            edge_verts = {}
             thresh = self.edge_threshold
-
+            
             for edge in bm.edges:
                 add_edge = False
-                # this is going to be similar to detect_sharp_edges but i need to modify it a little so i wont be calling it
+                edge_sharpness = 0.0
+                
                 if edge.is_manifold and len(edge.link_faces) == 2:
                     angle = edge.link_faces[0].normal.angle(edge.link_faces[1].normal)
                     if angle > thresh:
                         add_edge = True
-                elif len(edge.link_faces) == 1:
+                        edge_sharpness = min(1.0, (angle - thresh) / thresh)
+                elif len(edge.link_faces) <= 1: 
                     add_edge = True
-
-                if add_edge:
-                    edge_verts.update([v.index for v in edge.verts])
-
-            if self.wear_falloff > 0:
-                extended_verts = set(edge_verts)
-                for vert_idx in list(edge_verts):
-                    vert = bm.verts[vert_idx]
-                    for edge in vert.link_edges:
-                        for connected_vert in edge.verts:
-                            if connected_vert.index not in extended_verts:
-                                dist = (vert.co - connected_vert.co).length
-                                if dist <= self.wear_falloff:
-                                    weight = 1.0 - (dist / self.wear_falloff)
-
-                                    if random.random() < weight * (1.0 - self.wear_randomness * 0.5):
-                                        extended_verts.add(connected_vert.index)
+                    edge_sharpness = 1.0
                 
-                edge_verts = extended_verts
-
+                if add_edge:
+                    for vert in edge.verts:
+                        current_weight = edge_verts.get(vert.index, 0.0)
+                        edge_verts[vert.index] = max(current_weight, edge_sharpness)
+            
+            if self.wear_falloff > 0:
+                falloff_verts = dict(edge_verts)  
+                
+                for vert_idx, base_weight in edge_verts.items():
+                    vert = bm.verts[vert_idx]
+                
+                    nearby_verts = []
+                    self.find_nearby_vertices(bm, vert, self.wear_falloff, nearby_verts, set([vert_idx]))
+                    
+                    for nearby_vert, distance in nearby_verts:
+                        if nearby_vert.index not in falloff_verts:
+                            falloff_factor = 1.0 - (distance / self.wear_falloff)
+                            falloff_weight = base_weight * falloff_factor
+                            
+                            if self.wear_randomness > 0:
+                                random_factor = 1.0 - (random.random() * self.wear_randomness * 0.5)
+                                falloff_weight *= random_factor
+                            
+                            if falloff_weight > 0.1:  
+                                falloff_verts[nearby_vert.index] = falloff_weight
+                
+                edge_verts = falloff_verts
+            
             bmesh.update_edit_mesh(obj.data)
             bpy.ops.object.mode_set(mode='OBJECT')
-
-            for vert_idx in edge_verts:
-                base_weight = 1.0
+            
+            for vert_idx, weight in edge_verts.items():
+                final_weight = weight
                 if self.wear_randomness > 0:
-                    weight_variation = self.wear_randomness * random.random()
-                    base_weight = max(0.1, 1.0 - weight_variation)
-
-                edge_group.add([vert_idx], base_weight, 'REPLACE')
+                    random_variation = 1.0 - (random.random() * self.wear_randomness * 0.3)
+                    final_weight = max(0.05, weight * random_variation)
+                
+                edge_group.add([vert_idx], final_weight, 'REPLACE')
         
         finally:
             bpy.context.view_layer.objects.active = original_active
@@ -1549,6 +1547,111 @@ class OBJECT_OT_easy_edge_wear(bpy.types.Operator):
                 pass
 
         return wear_texture
+
+    
+    def find_nearby_vertices(self, bm, start_vert, max_distance, result_list, visited):
+        for edge in start_vert.link_edges:
+            for connected_vert in edge.verts:
+                if connected_vert.index in visited:
+                    continue
+                    
+                distance = (start_vert.co - connected_vert.co).length
+                if distance <= max_distance:
+                    result_list.append((connected_vert, distance))
+                    visited.add(connected_vert.index)
+                    
+                    remaining_distance = max_distance - distance
+                    if remaining_distance > 0.001:  
+                        self.find_nearby_vertices(bm, connected_vert, remaining_distance, result_list, visited)
+    
+    def create_texture_variation_group(self, obj, base_edge_group):
+        group_name = "EdgeWear_TextureVariation"
+        
+        if group_name in obj.vertex_groups:
+            obj.vertex_groups.remove(obj.vertex_groups[group_name])
+        
+        variation_group = obj.vertex_groups.new(name=group_name)
+        
+        for vert_idx in range(len(obj.data.vertices)):
+            try:
+                base_weight = base_edge_group.weight(vert_idx)
+                if base_weight > 0:
+                    variation_factor = random.random() * self.wear_randomness
+                    if variation_factor > 0.5:  
+                        varied_weight = base_weight * variation_factor
+                        variation_group.add([vert_idx], varied_weight, 'REPLACE')
+            except RuntimeError:
+                continue
+        
+        return variation_group
+    
+    def create_edge_masked_texture(self):
+        texture_name = f"EdgeWear_Masked_{self.seed}"
+        
+        if texture_name in bpy.data.textures:
+            bpy.data.textures.remove(bpy.data.textures[texture_name])
+        
+        wear_texture = bpy.data.textures.new(texture_name, 'NOISE')
+        
+        try:
+            wear_texture.noise_scale = self.wear_scale * 2.0
+            
+            if self.wear_type == 'SCRATCH':
+                wear_texture.noise_basis = 'BLENDER_ORIGINAL'
+                wear_texture.noise_type = 'HARD_NOISE'
+                if hasattr(wear_texture, 'turbulence'):
+                    wear_texture.turbulence = 2.0
+            elif self.wear_type == 'CHIPS':
+                wear_texture.noise_basis = 'VORONOI_CRACKLE'
+                wear_texture.noise_type = 'HARD_NOISE'
+            elif self.wear_type == 'SMOOTH':
+                wear_texture.noise_basis = 'IMPROVED_PERLIN'
+                wear_texture.noise_type = 'SOFT_NOISE'
+            else:  # MIXED
+                wear_texture.noise_basis = 'BLENDER_ORIGINAL'
+                wear_texture.noise_type = 'SOFT_NOISE'
+                
+        except AttributeError as e:
+            print(f"Warning: Could not set noise properties: {e}")
+        
+        return wear_texture
+    
+    def add_masked_texture_displacement(self, obj, edge_group):
+        wear_texture = self.create_edge_masked_texture()
+        
+        displace_mod = obj.modifiers.new("EdgeWear_Displace", 'DISPLACE')
+        displace_mod.vertex_group = edge_group.name 
+        displace_mod.strength = -self.wear_intensity
+        displace_mod.direction = 'NORMAL'
+        displace_mod.texture = wear_texture
+        displace_mod.texture_coords = 'LOCAL'  
+
+        variation_group = self.create_texture_variation_group(obj, edge_group)
+
+        if variation_group:
+            detail_mod = obj.modifiers.new("EdgeWear_Detail", 'DISPLACE')
+            detail_mod.vertex_group = variation_group.name
+            detail_mod.strength = -self.wear_intensity * 0.5
+            detail_mod.direction = 'NORMAL'
+            detail_mod.texture = wear_texture
+            detail_mod.texture_coords = 'LOCAL'
+    
+    def add_vertex_group_only_displacement(self, obj, edge_group):
+        displace_mod = obj.modifiers.new("EdgeWear_Displace", 'DISPLACE')
+        displace_mod.vertex_group = edge_group.name
+        displace_mod.strength = -self.wear_intensity
+        displace_mod.direction = 'NORMAL'
+        
+        if self.wear_randomness > 0.3:
+            wave_mod = obj.modifiers.new("EdgeWear_Variation", 'WAVE')
+            wave_mod.vertex_group = edge_group.name
+            wave_mod.height = self.wear_intensity * 0.3 * self.wear_randomness
+            wave_mod.width = 0.5
+            wave_mod.speed = 0
+            wave_mod.start_position_x = random.uniform(-1.0, 1.0)
+            wave_mod.start_position_y = random.uniform(-1.0, 1.0)
+
+
     
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self, width=400)

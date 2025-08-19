@@ -1051,3 +1051,687 @@ class OBJECT_OT_easy_mirror_gizmo(bpy.types.Operator):
         blf.color(font_id, *color)
         blf.draw(font_id, text)
 
+
+    wear_intensity: FloatProperty(
+        name="Wear Intensity",
+        description="Intensity of edge wear",
+        default = 0.1,
+        min=0.001,
+        max=1.0,
+        precision=3
+    )
+
+    wear_scale: FloatProperty(
+        name="Wear Scale",
+        description="Scale of the wear pattern",
+        default=5.0,
+        min=0.1,
+        max=50.0,
+        precision=2
+    )
+
+    edge_threshold: FloatProperty(
+        name="Edge Detection Angle",
+        description="Angle threshold for detecting sharp edges",
+        default=math.radians(45),
+        min=math.radians(1),
+        max=math.radians(180),
+        unit='ROTATION'
+    )
+
+    wear_falloff: FloatProperty(
+        name="Wear Falloff",
+        description="Distance the wear extends from the edges",
+        default=0.05,
+        min=0.001,
+        max=1.0,
+        precision=3
+    )
+    wear_randomness: FloatProperty(
+        name="Randomness",
+        description="Randomness in wear pattern",
+        default=0.5,
+        min=0.0,
+        max=1.0,
+        precision=2
+    )
+    
+    wear_type: EnumProperty(
+        name="Wear Type",
+        description="Type of wear pattern to generate",
+        items=[
+            ('SCRATCH', "Scratches", "Generate scratch-like wear patterns"),
+            ('CHIPS', "Chips", "Generate chipped edge patterns"),
+            ('SMOOTH', "Smooth Wear", "Generate smooth worn edges"),
+            ('MIXED', "Mixed", "Combination of wear types"),
+        ],
+        default='MIXED'
+    )
+    
+    subdivision_levels: IntProperty(
+        name="Detail Level",
+        description="Subdivision levels for wear detail",
+        default=2,
+        min=1,
+        max=4
+    )
+    
+    apply_modifiers: BoolProperty(
+        name="Apply Existing Modifiers",
+        description="Apply existing modifiers before adding wear",
+        default=True
+    )
+    
+    preserve_sharp_edges: BoolProperty(
+        name="Preserve Sharp Edges",
+        description="Keep original sharp edge marking",
+        default=True
+    )
+    
+    use_geonodes: BoolProperty(
+        name="Use Geonodes",
+        description="Either use Geonodes or Texture displacement method",
+        default=True
+    )
+
+    seed: IntProperty(
+        name="Random Seed",
+        description="Seed for randomization",
+        default=0,
+        min=0,
+        max=999999
+    )
+
+    def execute(self, context):
+        random.seed(self.seed)
+        processed_count = 0
+
+        for obj in utils.get_target_objects(context):
+            if obj.type != 'MESH':
+                continue
+
+            context.view_layer.objects.active = obj
+            if self.apply_modifiers:
+                utils.smart_apply_modifiers(obj)
+
+            self.remove_existing_wear_modifiers(context, obj)
+            self.generate_edge_wear(context, obj)
+
+            utils.recalculate_normals_for_objects(context, [obj])
+            processed_count += 1
+        
+        self.report({'INFO'}, f"Edge wear applied to {processed_count} object(s).")
+        return {'FINISHED'}
+    
+    def remove_existing_wear_modifiers(self, context, obj):
+        mods_to_remove = []
+        for mod in obj.modifiers:
+            if mod.name.startswith("EdgeWear_"):
+                mods_to_remove.append(mod)
+        
+        for mod in mods_to_remove:
+            obj.modifiers.remove(mod)
+
+    def generate_edge_wear(self, context, obj):
+        if self.subdivision_levels > 0:
+            subsurf = obj.modifiers.new("EdgeWear_Detail", 'SUBSURF')
+            subsurf.levels = 4
+            subsurf.subdivision_type = 'SIMPLE'
+
+        if self.use_geonodes:
+            self.add_geometry_nodes_wear(obj)
+        else:
+            self.add_displacement_wear(obj)
+        
+        if self.wear_type in ['SMOOTH', 'MIXED']:
+            smooth_mod = obj.modifiers.new("EdgeWear_Smooth", 'SMOOTH')
+            smooth_mod.iterations = 2
+            smooth_mod.factor = 0.2
+        
+        bpy.context.view_layer.objects.active = obj
+        for mod in obj.modifiers:
+            if mod.type == 'BEVEL':
+                while obj.modifiers.find(mod.name) < len(obj.modifiers) - 1:
+                    bpy.ops.object.modifier_move_down(modifier=mod.name)
+
+
+    def add_geometry_nodes_wear(self, obj):
+        geo_mod = obj.modifiers.new("EdgeWear_Geometry", 'NODES')
+        node_group = self.create_edge_wear_node_group()
+        geo_mod.node_group = node_group
+
+        try:
+            geo_mod["Input_2"] = self.wear_intensity
+            geo_mod["Input_3"] = self.wear_scale
+            geo_mod["Input_4"] = self.wear_falloff
+            geo_mod["Input_5"] = self.wear_randomness
+            geo_mod["Input_6"] = self.edge_threshold
+        except (KeyError, TypeError):
+            for input_socket in geo_mod.node_group.interface.items_tree:
+                if hasattr(input_socket, 'socket_type') and input_socket.socket_type == 'NodeSocketFloat':
+                    if "Intensity" in input_socket.name:
+                        try:
+                            geo_mod[input_socket.identifier] = self.wear_intensity
+                        except:
+                            pass
+                    elif "Scale" in input_socket.name:
+                        try:
+                            geo_mod[input_socket.identifier] = self.wear_scale
+                        except:
+                            pass
+                    elif "Falloff" in input_socket.name:
+                        try:
+                            geo_mod[input_socket.identifier] = self.wear_falloff
+                        except:
+                            pass
+                    elif "Randomness" in input_socket.name:
+                        try:
+                            geo_mod[input_socket.identifier] = self.wear_randomness
+                        except:
+                            pass
+                    elif "Edge Angle" in input_socket.name:
+                        try:
+                            geo_mod[input_socket.identifier] = self.edge_threshold
+                        except:
+                            pass
+        if "EdgeWear_Edges" in obj.vertex_groups:
+            pass
+            
+        return geo_mod
+
+    def create_edge_wear_node_group(self):
+
+        """
+            this was beyond unholy to do and unholy to test if this works first try I will rip out my toenail out of glee
+        """
+        group_name = "EdgeWear_NodeGroup"
+        if group_name in bpy.data.node_groups:
+            return bpy.data.node_groups[group_name]
+        
+        node_group = bpy.data.node_groups.new(group_name, 'GeometryNodeTree')
+        
+        group_input = node_group.nodes.new('NodeGroupInput')
+        group_output = node_group.nodes.new('NodeGroupOutput')
+        group_input.location = (-800, 0)
+        group_output.location = (800, 0)
+        
+        # Create input/output sockets
+        node_group.interface.new_socket(name="Geometry", socket_type='NodeSocketGeometry', in_out='INPUT')
+        node_group.interface.new_socket(name="Intensity", socket_type='NodeSocketFloat', in_out='INPUT')
+        node_group.interface.new_socket(name="Scale", socket_type='NodeSocketFloat', in_out='INPUT')
+        node_group.interface.new_socket(name="Falloff", socket_type='NodeSocketFloat', in_out='INPUT')
+        node_group.interface.new_socket(name="Randomness", socket_type='NodeSocketFloat', in_out='INPUT')
+        node_group.interface.new_socket(name="Edge Angle", socket_type='NodeSocketFloat', in_out='INPUT')
+        
+        node_group.interface.new_socket(name="Geometry", socket_type='NodeSocketGeometry', in_out='OUTPUT')
+        
+        # Set default values
+        node_group.interface.items_tree["Intensity"].default_value = 0.1
+        node_group.interface.items_tree["Scale"].default_value = 5.0
+        node_group.interface.items_tree["Falloff"].default_value = 0.05
+        node_group.interface.items_tree["Randomness"].default_value = 0.5
+        node_group.interface.items_tree["Edge Angle"].default_value = math.radians(45)
+        
+        nodes = node_group.nodes
+        links = node_group.links
+
+        edge_angle = nodes.new('GeometryNodeInputMeshEdgeAngle')
+        edge_angle.location = (-600, 200)
+
+        compare = nodes.new('FunctionNodeCompare')
+        compare.location = (-400, 200)
+        compare.data_type = 'FLOAT'
+        compare.operation = 'GREATER_THAN'
+        
+        position = nodes.new('GeometryNodeInputPosition')
+        position.location = (-600, -100)
+        
+        vector_scale = nodes.new('ShaderNodeVectorMath')
+        vector_scale.location = (-500, -100)
+        vector_scale.operation = 'MULTIPLY'
+
+        noise_texture = nodes.new('ShaderNodeTexNoise')
+        noise_texture.location = (-400, -100)
+        noise_texture.noise_dimensions = '3D'
+
+        voronoi = nodes.new('ShaderNodeTexVoronoi')
+        voronoi.location = (-400, -300)
+        voronoi.voronoi_dimensions = '3D'
+        voronoi.feature = 'F1'
+
+        wave = nodes.new('ShaderNodeTexWave')
+        wave.location = (-400, -400)
+        wave.wave_type = 'BANDS'
+        wave.wave_profile = 'SAW'
+        
+        mix_wear_types = nodes.new('ShaderNodeMix')
+        mix_wear_types.location = (-100, -300)
+        mix_wear_types.data_type = 'FLOAT'
+        mix_wear_types.blend_type = 'MIX'
+
+        random_value = nodes.new('FunctionNodeRandomValue')
+        random_value.location = (-400, -200)
+        random_value.data_type = 'FLOAT'
+
+        vector_to_float = nodes.new('ShaderNodeSeparateXYZ')
+        vector_to_float.location = (-500, -200)
+        
+        add_xyz = nodes.new('ShaderNodeMath')
+        add_xyz.location = (-450, -150)
+        add_xyz.operation = 'ADD'
+        
+        add_z = nodes.new('ShaderNodeMath') 
+        add_z.location = (-400, -150)
+        add_z.operation = 'ADD'
+        
+        color_ramp = nodes.new('ShaderNodeValToRGB')
+        color_ramp.location = (0, -300)
+        color_ramp.color_ramp.elements[0].position = 0.3
+        color_ramp.color_ramp.elements[0].color = (0, 0, 0, 1)
+        color_ramp.color_ramp.elements[1].position = 0.7
+        color_ramp.color_ramp.elements[1].color = (1, 1, 1, 1)
+        
+        multiply_intensity = nodes.new('ShaderNodeMath')
+        multiply_intensity.location = (-200, -100)
+        multiply_intensity.operation = 'MULTIPLY'
+
+        multiply_edge_noise = nodes.new('ShaderNodeMath')
+        multiply_edge_noise.location = (0, 0)
+        multiply_edge_noise.operation = 'MULTIPLY'
+        
+
+        normal = nodes.new('GeometryNodeInputNormal')
+        normal.location = (0, -200)
+        
+        displacement_vector = nodes.new('ShaderNodeVectorMath')
+        displacement_vector.location = (200, -100)
+        displacement_vector.operation = 'MULTIPLY'
+        
+        negate_displacement = nodes.new('ShaderNodeMath')
+        negate_displacement.location = (300, -200)
+        negate_displacement.operation = 'MULTIPLY'
+        negate_displacement.inputs[1].default_value = -1.0
+        final_intensity = nodes.new('ShaderNodeMath')
+        final_intensity.location = (400, -100)
+        final_intensity.operation = 'MULTIPLY'
+        
+        set_position = nodes.new('GeometryNodeSetPosition')
+        set_position.location = (600, 0)
+
+        links.new(group_input.outputs["Geometry"], set_position.inputs["Geometry"])
+        links.new(set_position.outputs["Geometry"], group_output.inputs["Geometry"])
+
+        links.new(edge_angle.outputs["Unsigned Angle"], compare.inputs[0])
+        links.new(group_input.outputs["Edge Angle"], compare.inputs[1])
+
+        links.new(position.outputs["Position"], vector_scale.inputs[0])
+        links.new(group_input.outputs["Scale"], vector_scale.inputs[1])
+
+        links.new(vector_scale.outputs["Vector"], noise_texture.inputs["Vector"])
+        links.new(group_input.outputs["Scale"], noise_texture.inputs["Scale"])
+        
+        links.new(vector_scale.outputs["Vector"], voronoi.inputs["Vector"])
+        links.new(group_input.outputs["Scale"], voronoi.inputs["Scale"])
+        
+        links.new(vector_scale.outputs["Vector"], wave.inputs["Vector"])
+        links.new(group_input.outputs["Scale"], wave.inputs["Scale"])
+
+        links.new(position.outputs["Position"], vector_to_float.inputs["Vector"])
+        links.new(vector_to_float.outputs["X"], add_xyz.inputs[0])
+        links.new(vector_to_float.outputs["Y"], add_xyz.inputs[1])
+        links.new(add_xyz.outputs["Value"], add_z.inputs[0])
+        links.new(vector_to_float.outputs["Z"], add_z.inputs[1])
+        links.new(add_z.outputs["Value"], random_value.inputs["ID"])
+
+        links.new(noise_texture.outputs["Fac"], mix_wear_types.inputs["A"])
+        links.new(voronoi.outputs["Distance"], mix_wear_types.inputs["B"])
+        links.new(group_input.outputs["Randomness"], mix_wear_types.inputs["Factor"])
+        links.new(mix_wear_types.outputs["Result"], color_ramp.inputs["Fac"])
+        
+        links.new(color_ramp.outputs["Color"], multiply_intensity.inputs[0])
+        links.new(group_input.outputs["Intensity"], multiply_intensity.inputs[1])
+        
+        links.new(compare.outputs["Result"], multiply_edge_noise.inputs[0])
+        links.new(multiply_intensity.outputs["Value"], multiply_edge_noise.inputs[1])
+        links.new(multiply_edge_noise.outputs["Value"], negate_displacement.inputs[0])
+        links.new(negate_displacement.outputs["Value"], final_intensity.inputs[0])
+        links.new(group_input.outputs["Falloff"], final_intensity.inputs[1])
+    
+        links.new(normal.outputs["Normal"], displacement_vector.inputs[0])
+        links.new(final_intensity.outputs["Value"], displacement_vector.inputs[1])
+        links.new(displacement_vector.outputs["Vector"], set_position.inputs["Offset"])
+        
+        return node_group
+
+
+    def add_displacement_wear(self, obj):
+        edge_group = self.create_edge_vertex_group(obj)
+        
+        if self.wear_type in ['SMOOTH', 'MIXED']:
+            self.add_vertex_group_only_displacement(obj, edge_group)
+        else:
+            self.add_masked_texture_displacement(obj, edge_group)
+        
+        smooth_mod = obj.modifiers.new("EdgeWear_CorrectiveSmooth", 'CORRECTIVE_SMOOTH')
+        smooth_mod.iterations = 2
+        smooth_mod.smooth_type = 'LENGTH_WEIGHTED'
+    
+    def create_edge_vertex_group(self, obj):
+        group_name = "EdgeWear_Edges"
+        if group_name in obj.vertex_groups:
+            obj.vertex_groups.remove(obj.vertex_groups[group_name])
+        
+        edge_group = obj.vertex_groups.new(name=group_name)
+        
+        original_active = bpy.context.view_layer.objects.active
+        bpy.context.view_layer.objects.active = obj
+        original_mode = bpy.context.mode
+        
+        try:
+            bpy.ops.object.mode_set(mode='EDIT')
+            bm = bmesh.from_edit_mesh(obj.data)
+            bm.edges.ensure_lookup_table()
+            bm.faces.ensure_lookup_table()
+            bm.verts.ensure_lookup_table()
+            
+            for v in bm.verts:
+                v.select = False
+            for e in bm.edges:
+                e.select = False
+            for f in bm.faces:
+                f.select = False
+            
+            edge_verts = {}
+            thresh = self.edge_threshold
+            
+            for edge in bm.edges:
+                add_edge = False
+                edge_sharpness = 0.0
+                
+                if edge.is_manifold and len(edge.link_faces) == 2:
+                    angle = edge.link_faces[0].normal.angle(edge.link_faces[1].normal)
+                    if angle > thresh:
+                        add_edge = True
+                        edge_sharpness = min(1.0, (angle - thresh) / thresh)
+                elif len(edge.link_faces) <= 1: 
+                    add_edge = True
+                    edge_sharpness = 1.0
+                
+                if add_edge:
+                    for vert in edge.verts:
+                        current_weight = edge_verts.get(vert.index, 0.0)
+                        edge_verts[vert.index] = max(current_weight, edge_sharpness)
+            
+            if self.wear_falloff > 0:
+                falloff_verts = dict(edge_verts)  
+                
+                for vert_idx, base_weight in edge_verts.items():
+                    vert = bm.verts[vert_idx]
+                
+                    nearby_verts = []
+                    self.find_nearby_vertices(bm, vert, self.wear_falloff, nearby_verts, set([vert_idx]))
+                    
+                    for nearby_vert, distance in nearby_verts:
+                        if nearby_vert.index not in falloff_verts:
+                            falloff_factor = 1.0 - (distance / self.wear_falloff)
+                            falloff_weight = base_weight * falloff_factor
+                            
+                            if self.wear_randomness > 0:
+                                random_factor = 1.0 - (random.random() * self.wear_randomness * 0.5)
+                                falloff_weight *= random_factor
+                            
+                            if falloff_weight > 0.1:  
+                                falloff_verts[nearby_vert.index] = falloff_weight
+                
+                edge_verts = falloff_verts
+            
+            bmesh.update_edit_mesh(obj.data)
+            bpy.ops.object.mode_set(mode='OBJECT')
+            
+            for vert_idx, weight in edge_verts.items():
+                final_weight = weight
+                if self.wear_randomness > 0:
+                    random_variation = 1.0 - (random.random() * self.wear_randomness * 0.3)
+                    final_weight = max(0.05, weight * random_variation)
+                
+                edge_group.add([vert_idx], final_weight, 'REPLACE')
+        
+        finally:
+            bpy.context.view_layer.objects.active = original_active
+            if original_mode != 'OBJECT':
+                try:
+                    bpy.ops.object.mode_set(mode=original_mode.replace('_', '').lower())
+                except:
+                    pass
+        
+        return edge_group
+
+    def create_wear_texture(self):
+        texture_name = f"EdgeWear_Texture_{self.seed}"
+
+        if texture_name in bpy.data.textures:
+            bpy.data.textures.remove(bpy.data.textures[texture_name])
+
+        wear_texture = bpy.data.textures.new(texture_name, 'NOISE')
+        
+        try:
+            wear_texture.noise_scale = self.wear_scale
+        except AttributeError:
+            if hasattr(wear_texture, 'scale'):
+                wear_texture.scale = self.wear_scale
+            else:
+                print(f"Warning: Could not set noise scale for texture {texture_name}")
+        try:
+            if self.wear_type == 'SCRATCH':
+                wear_texture.noise_basis = 'BLENDER_ORIGINAL'
+                wear_texture.noise_type = 'HARD_NOISE'
+            elif self.wear_type == 'CHIPS':
+                wear_texture.noise_basis = 'VORONOI_CRACKLE'
+                wear_texture.noise_type = 'HARD_NOISE'
+            elif self.wear_type == 'SMOOTH':
+                wear_texture.noise_basis = 'IMPROVED_PERLIN'
+                wear_texture.noise_type = 'SOFT_NOISE'
+            else:  
+                wear_texture.noise_basis = 'BLENDER_ORIGINAL'
+                wear_texture.noise_type = 'SOFT_NOISE'
+        except AttributeError as e:
+            print(f"Warning: Could not set noise properties: {e}")
+            try:
+                wear_texture.noise_basis = 'PERLIN_ORIGINAL'
+                wear_texture.noise_type = 'SOFT_NOISE'
+            except:
+                pass
+
+        return wear_texture
+
+    
+    def find_nearby_vertices(self, bm, start_vert, max_distance, result_list, visited):
+        for edge in start_vert.link_edges:
+            for connected_vert in edge.verts:
+                if connected_vert.index in visited:
+                    continue
+                    
+                distance = (start_vert.co - connected_vert.co).length
+                if distance <= max_distance:
+                    result_list.append((connected_vert, distance))
+                    visited.add(connected_vert.index)
+                    
+                    remaining_distance = max_distance - distance
+                    if remaining_distance > 0.001:  
+                        self.find_nearby_vertices(bm, connected_vert, remaining_distance, result_list, visited)
+    
+    def create_texture_variation_group(self, obj, base_edge_group):
+        group_name = "EdgeWear_TextureVariation"
+        
+        if group_name in obj.vertex_groups:
+            obj.vertex_groups.remove(obj.vertex_groups[group_name])
+        
+        variation_group = obj.vertex_groups.new(name=group_name)
+        
+        for vert_idx in range(len(obj.data.vertices)):
+            try:
+                base_weight = base_edge_group.weight(vert_idx)
+                if base_weight > 0:
+                    variation_factor = random.random() * self.wear_randomness
+                    if variation_factor > 0.5:  
+                        varied_weight = base_weight * variation_factor
+                        variation_group.add([vert_idx], varied_weight, 'REPLACE')
+            except RuntimeError:
+                continue
+        
+        return variation_group
+    
+    def create_edge_masked_texture(self):
+        texture_name = f"EdgeWear_Masked_{self.seed}"
+        
+        if texture_name in bpy.data.textures:
+            bpy.data.textures.remove(bpy.data.textures[texture_name])
+        
+        wear_texture = bpy.data.textures.new(texture_name, 'NOISE')
+        
+        try:
+            wear_texture.noise_scale = self.wear_scale * 2.0
+            
+            if self.wear_type == 'SCRATCH':
+                wear_texture.noise_basis = 'BLENDER_ORIGINAL'
+                wear_texture.noise_type = 'HARD_NOISE'
+                if hasattr(wear_texture, 'turbulence'):
+                    wear_texture.turbulence = 2.0
+            elif self.wear_type == 'CHIPS':
+                wear_texture.noise_basis = 'VORONOI_CRACKLE'
+                wear_texture.noise_type = 'HARD_NOISE'
+            elif self.wear_type == 'SMOOTH':
+                wear_texture.noise_basis = 'IMPROVED_PERLIN'
+                wear_texture.noise_type = 'SOFT_NOISE'
+            else:  # MIXED
+                wear_texture.noise_basis = 'BLENDER_ORIGINAL'
+                wear_texture.noise_type = 'SOFT_NOISE'
+                
+        except AttributeError as e:
+            print(f"Warning: Could not set noise properties: {e}")
+        
+        return wear_texture
+    
+    def add_masked_texture_displacement(self, obj, edge_group):
+        wear_texture = self.create_edge_masked_texture()
+        
+        displace_mod = obj.modifiers.new("EdgeWear_Displace", 'DISPLACE')
+        displace_mod.vertex_group = edge_group.name 
+        displace_mod.strength = -self.wear_intensity
+        displace_mod.direction = 'NORMAL'
+        displace_mod.texture = wear_texture
+        displace_mod.texture_coords = 'LOCAL'  
+
+        variation_group = self.create_texture_variation_group(obj, edge_group)
+
+        if variation_group:
+            detail_mod = obj.modifiers.new("EdgeWear_Detail", 'DISPLACE')
+            detail_mod.vertex_group = variation_group.name
+            detail_mod.strength = -self.wear_intensity * 0.5
+            detail_mod.direction = 'NORMAL'
+            detail_mod.texture = wear_texture
+            detail_mod.texture_coords = 'LOCAL'
+    
+    def add_vertex_group_only_displacement(self, obj, edge_group):
+        displace_mod = obj.modifiers.new("EdgeWear_Displace", 'DISPLACE')
+        displace_mod.vertex_group = edge_group.name
+        displace_mod.strength = -self.wear_intensity
+        displace_mod.direction = 'NORMAL'
+        
+        if self.wear_randomness > 0.3:
+            wave_mod = obj.modifiers.new("EdgeWear_Variation", 'WAVE')
+            wave_mod.vertex_group = edge_group.name
+            wave_mod.height = self.wear_intensity * 0.3 * self.wear_randomness
+            wave_mod.width = 0.5
+            wave_mod.speed = 0
+            wave_mod.start_position_x = random.uniform(-1.0, 1.0)
+            wave_mod.start_position_y = random.uniform(-1.0, 1.0)
+
+
+    
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=400)
+    
+    def draw(self, context):
+        layout = self.layout
+
+        col = layout.column()
+        col.prop(self, "use_geonodes")
+
+        col = layout.column()
+        col.prop(self, "wear_type")
+        col.prop(self, "wear_intensity")
+        col.prop(self, "wear_falloff")
+        col.prop(self, "wear_randomness")
+
+        layout.separator()
+
+        col = layout.column()
+        col.label(text="Edge Detection:")
+        col.prop(self, "edge_threshold")
+
+        layout.separator()
+        col = layout.column()
+        col.prop(self, "apply_modifiers")
+        col.prop(self, "preserve_sharp_edges")
+        col.prop(self, "seed")
+    
+class OBJECT_OT_easy_edge_wear_regenerate(bpy.types.Operator):
+    bl_idname = "object.easy_edge_wear_regenerate"
+    bl_label = "Regenerate Edge Wear"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        new_seed = random.randint(0, 999999)
+
+        bpy.ops.object.easy_edge_wear(
+            'INVOKE_DEFAULT',
+            seed=new_seed
+        )
+
+        return {'FINISHED'}
+
+class OBJECT_OT_easy_edge_wear_remove(bpy.types.Operator):
+    bl_idname = "object.easy_edge_wear_remove"
+    bl_label = "Remove Edge Wear"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        removed_count = 0
+
+        for obj in utils.get_target_objects(context):
+            if obj.type != 'MESH':
+                continue
+
+            mods_to_remove = []
+            for mod in obj.modifiers:
+                if mod.name.startswith("EdgeWear_"):
+                    mods_to_remove.append(mod)
+                    removed_count += 1
+        
+            groups_to_remove = []
+            for group in obj.vertex_groups:
+                if group.name.startswith("EdgeWear_"):
+                    groups_to_remove.append(group)
+            
+            for group in groups_to_remove:
+                obj.vertex_groups.remove(group)
+
+            textures_to_remove = []
+            for texture in bpy.data.textures:
+                if texture.name.startswith("EdgeWear_Texture_"):
+                    texture_users = sum(1 for obj_check in bpy.data.objects
+                                        if obj_check.type == 'MESH'
+                                        for mod in obj_check.modifiers
+                                        if hasattr(mod, 'texture') and mod.texture == texture)
+
+                    if texture_users <= 1:
+                        textures_to_remove.append(texture)
+            
+            for texture in textures_to_remove:
+                bpy.data.textures.remove(texture)
+
+        self.report({'INFO'}, f"Removed edge wear from objects ({removed_count} modifiers removed)")
+        return {'FINISHED'}
+                                    
+                            

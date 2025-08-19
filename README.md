@@ -1,5 +1,7 @@
 
 # EasyUtils & EasyOps for Blender 4.xx/4.5
+### EasyOps Experimental Geonodes
+This branch is specifically focused on developing Geonode operations for the add-on, such as the current edge wear which can be based on both displacement textures and geonodes, this is feature does not work most of the time and can cause crashes which will completely wipe a project until the last autosave so regular usage is not recommended.
 
 **EasyUtils & EasyOps** is a Blender add-on that provides a set of tools designed to make common mesh operations easier, faster and optimized for a hardsurface modelling workflow. For any extra information please refer [here](https://asian-mario.github.io/easyops-doc/).
 
